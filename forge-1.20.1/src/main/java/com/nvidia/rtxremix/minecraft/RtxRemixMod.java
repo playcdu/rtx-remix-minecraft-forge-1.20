@@ -18,7 +18,7 @@ import com.nvidia.rtxremix.minecraft.screen.CopperBeaconScreen;
 import com.nvidia.rtxremix.minecraft.profiling.WorldRendererProfilingAccess;
 import com.nvidia.rtxremix.minecraft.profiling.TracyGCListener;
 import com.nvidia.rtxremix.minecraft.profiling.ProfileScope;
-import com.nvidia.rtxremix.minecraft.particle.rapids.RapidFoamParticles;
+import com.nvidia.rtxremix.minecraft.particle.rapids.RapidFoamParticleProviders;
 import com.nvidia.rtxremix.minecraft.logic.ZoneRegistry;
 import com.nvidia.rtxremix.minecraft.logic.ZonePersistentState;
 import com.nvidia.rtxremix.minecraft.logic.ZoneDefinition;
@@ -430,7 +430,7 @@ public class RtxRemixMod {
     }
 
     private void onRegisterParticleProviders(RegisterParticleProvidersEvent event) {
-        RapidFoamParticles.registerProviders(event);
+        RapidFoamParticleProviders.register(event);
     }
 
     private void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {

@@ -170,6 +170,13 @@ MICROSOFT. Minecraft is a trademark of Mojang Synergies AB.
 NVIDIA, GeForce, and RTX are trademarks and/or registered trademarks of NVIDIA
 Corporation in the U.S. and other countries.
 
+## Experimental Forge 1.20.1 For Society: Sunlit Valley
+
+The [Forge 1.20.1 module](forge-1.20.1/README.md) ports the renderer to
+Minecraft 1.20.1 on Forge 47.4 so it runs in the Society: Sunlit Valley
+modpack, alongside Embeddium and Create, with the pack's shader mods removed.
+Its guide covers building, installing into the pack, and what changes there.
+
 ## Experimental Forge 1.12.2
 
 The [Forge module](forge-1.12.2/README.md) provides a separate Windows x64 build.

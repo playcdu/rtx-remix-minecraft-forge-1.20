@@ -122,7 +122,7 @@ def packageForgeTask = tasks.register('packageForge', Zip) {
         dependsOn "fetchRuntimeSdk${suffix}", "compileNative${suffix}"
     }
     archiveBaseName.set(base.archivesName)
-    archiveVersion.set(project.version.toString() + (archProperty ? "-${archProperty}" : ''))
+    archiveVersion.set(project.version.toString())
     archiveExtension.set('jar')
     destinationDirectory.set(layout.buildDirectory.dir('distributions'))
     duplicatesStrategy = DuplicatesStrategy.FAIL

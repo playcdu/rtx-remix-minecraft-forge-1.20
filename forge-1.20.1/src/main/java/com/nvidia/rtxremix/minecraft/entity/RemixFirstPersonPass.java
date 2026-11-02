@@ -91,9 +91,12 @@ public final class RemixFirstPersonPass implements AutoCloseable {
         context.begin(true);
 
         try {
-            // Vanilla roots the hand stack at the inverse camera rotation and carries
-            // the camera rotation, tilt and bob in the model-view, so the model-view's
-            // origin is where the eye sits in the capture's space.
+            // 1.20.1's renderItemInHand resets the hand stack to identity and applies
+            // hurt tilt and bob on it, so the hand is drawn in view space and the
+            // model-view is identity (1.21 rooted the stack at the inverse camera
+            // rotation and carried the camera in the model-view). Either way the
+            // model-view's inverse origin is where the eye sits in the capture's space,
+            // and the view correction below folds the model-view into the bones.
             Matrix4f modelView = new Matrix4f(RenderSystem.getModelViewMatrix());
             modelView.invert(inverseModelView).transformPosition(eye.set(0.0f, 0.0f, 0.0f));
             context.setEye(eye.x, eye.y, eye.z);

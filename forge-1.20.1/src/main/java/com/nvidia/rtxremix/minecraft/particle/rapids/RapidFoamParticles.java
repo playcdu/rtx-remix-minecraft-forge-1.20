@@ -7,7 +7,6 @@ package com.nvidia.rtxremix.minecraft.particle.rapids;
 import com.nvidia.rtxremix.minecraft.RtxRemixCommonMod;
 import net.minecraft.core.particles.ParticleType;
 import net.minecraft.core.particles.SimpleParticleType;
-import net.minecraftforge.client.event.RegisterParticleProvidersEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -23,6 +22,9 @@ import net.minecraftforge.registries.RegistryObject;
  * the whole connection, their {@link RegistryObject}s report not present, and
  * {@link #isAvailable()} turns the spawner off until the client leaves. Nothing is ever
  * sent over the network for them, so the server never sees one either way.
+ *
+ * <p>Dedicated servers load this class, so it names no client class: the providers are
+ * bound by {@link RapidFoamParticleProviders}, which only the client bootstrap reaches.
  */
 public final class RapidFoamParticles {
     private static final DeferredRegister<ParticleType<?>> PARTICLE_TYPES =
@@ -40,13 +42,6 @@ public final class RapidFoamParticles {
     /** Adds the types to the mod event bus; called on both sides. */
     public static void register(IEventBus modBus) {
         PARTICLE_TYPES.register(modBus);
-    }
-
-    /** Client only: binds each type to its provider and the sprites its particle JSON lists. */
-    public static void registerProviders(RegisterParticleProvidersEvent event) {
-        event.registerSpriteSet(RAPID_FOAM.get(), RapidFoamParticle.Factory::new);
-        event.registerSpriteSet(RAPID_FOAM_DOT.get(), RapidFoamDotParticle.Factory::new);
-        event.registerSpriteSet(RAPID_MIST.get(), RapidMistParticle.Factory::new);
     }
 
     /**

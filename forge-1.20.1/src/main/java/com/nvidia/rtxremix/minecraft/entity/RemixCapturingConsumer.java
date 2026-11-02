@@ -38,7 +38,8 @@ import java.util.WeakHashMap;
  * mesh that never changes and a transform that does.
  *
  * <p>Uses pre-allocated flat arrays (struct-of-arrays) to avoid per-vertex object
- * allocations. Maximum capacity is {@link #MAX_VERTICES} per consumer.
+ * allocations. Capacity starts at {@link #MAX_VERTICES} per consumer and grows, rarely,
+ * up to {@link #MAX_GROWN_VERTICES}.
  *
  * <p>Must not implement Embeddium's {@code VertexBufferWriter}. Embeddium's entity and
  * item fast paths ({@code ModelPart.compile} and {@code ItemRenderer.renderModelLists}
@@ -52,11 +53,22 @@ import java.util.WeakHashMap;
 public class RemixCapturingConsumer implements VertexConsumer {
 
     /**
-     * Maximum vertices per consumer. Minecraft entities rarely exceed ~1500 vertices; the
-     * ceiling is set by glowing sign text, whose eight outline copies of four full lines
-     * on both faces approach 4000.
+     * Vertices a consumer holds before it grows. Minecraft entities rarely exceed ~1500
+     * vertices; the ceiling is set by glowing sign text, whose eight outline copies of
+     * four full lines on both faces approach 4000. The submitter's text layering steps
+     * past this many quads per text layer.
      */
     static final int MAX_VERTICES = 4096;
+    /**
+     * Ceiling a consumer may grow to past {@link #MAX_VERTICES}. With Flywheel's backend
+     * off, Create draws a whole contraption's or train carriage's blocks into one layer
+     * through its {@code SuperByteBuffer}s, which routinely passes 4096 vertices; a
+     * consumer that kept the fixed ceiling would drop the rest of the structure. Growth
+     * doubles the arrays and is kept by the pooled consumer, so it is paid once per
+     * high-water mark, not per frame; past this ceiling vertices are still dropped.
+     */
+    static final int MAX_GROWN_VERTICES = 1 << 16;
+    private int vertexCapacity = MAX_VERTICES;
 
     private ResourceLocation textureId;
     private RenderLayerUtils.Topology topology = RenderLayerUtils.Topology.QUADS;
@@ -69,24 +81,24 @@ public class RemixCapturingConsumer implements VertexConsumer {
 
     // ---- Struct-of-arrays vertex storage (pre-allocated, zero GC) ----
     private int vertexCount = 0;
-    private final float[] px = new float[MAX_VERTICES];
-    private final float[] py = new float[MAX_VERTICES];
-    private final float[] pz = new float[MAX_VERTICES];
-    private final float[] nx = new float[MAX_VERTICES];
-    private final float[] ny = new float[MAX_VERTICES];
-    private final float[] nz = new float[MAX_VERTICES];
-    private final float[] tu = new float[MAX_VERTICES];
-    private final float[] tv = new float[MAX_VERTICES];
+    private float[] px = new float[MAX_VERTICES];
+    private float[] py = new float[MAX_VERTICES];
+    private float[] pz = new float[MAX_VERTICES];
+    private float[] nx = new float[MAX_VERTICES];
+    private float[] ny = new float[MAX_VERTICES];
+    private float[] nz = new float[MAX_VERTICES];
+    private float[] tu = new float[MAX_VERTICES];
+    private float[] tv = new float[MAX_VERTICES];
     /**
      * Packed ARGB (0xAARRGGBB). Remix reads {@code HardcodedVertex.color} as
      * {@code VK_FORMAT_B8G8R8A8_UNORM} from a little-endian buffer, so any other
      * channel order reaches the renderer with red and blue swapped.
      */
-    private final int[] colors = new int[MAX_VERTICES];
-    private final int[] boneIndices = new int[MAX_VERTICES];
-    private final int[] texcoordBoundsMin = new int[MAX_VERTICES];
-    private final int[] texcoordBoundsMax = new int[MAX_VERTICES];
-    private final boolean[] generatedNormals = new boolean[MAX_VERTICES];
+    private int[] colors = new int[MAX_VERTICES];
+    private int[] boneIndices = new int[MAX_VERTICES];
+    private int[] texcoordBoundsMin = new int[MAX_VERTICES];
+    private int[] texcoordBoundsMax = new int[MAX_VERTICES];
+    private boolean[] generatedNormals = new boolean[MAX_VERTICES];
 
     // ---- Per-vertex accumulation state ----
     private float vx, vy, vz;
@@ -111,6 +123,8 @@ public class RemixCapturingConsumer implements VertexConsumer {
     // MAX_PARTS covers every quad being its own part. A strip layer could exceed
     // it by changing pivot every few vertices; parts past the cap are dropped.
     private static final int MAX_PARTS = MAX_VERTICES / 4;
+    private static final int MAX_GROWN_PARTS = MAX_GROWN_VERTICES / 4;
+    private int partCapacity = MAX_PARTS;
     private static final int VERTICES_PER_QUAD = 4;
     /** partStart for a cuboid part: its geometry lives in the Cuboid, not here. */
     static final int NO_VERTICES = -1;
@@ -153,10 +167,10 @@ public class RemixCapturingConsumer implements VertexConsumer {
     private BakedQuadStaticGeometryCache pendingBakedQuadCache;
     private int[] pendingBakedQuadVertexData;
 
-    private final int[] partStart = new int[MAX_PARTS];
-    private final int[] partVertexCount = new int[MAX_PARTS];
-    private final int[] partBone = new int[MAX_PARTS];
-    private final long[] partHash = new long[MAX_PARTS];
+    private int[] partStart = new int[MAX_PARTS];
+    private int[] partVertexCount = new int[MAX_PARTS];
+    private int[] partBone = new int[MAX_PARTS];
+    private long[] partHash = new long[MAX_PARTS];
     private int parts = 0;
     private boolean partOpen = false;
     // Four independent lanes, assigned by vertex-within-quad, so folding a quad
@@ -165,22 +179,22 @@ public class RemixCapturingConsumer implements VertexConsumer {
     private int layerIndex = 0;
     // Tagged onto each part so submit can key by cuboid identity. Null for
     // parts that came from baked quads or direct matrix vertices.
-    private final ModelPart.Polygon[][] partSides = new ModelPart.Polygon[MAX_PARTS][];
+    private ModelPart.Polygon[][] partSides = new ModelPart.Polygon[MAX_PARTS][];
     /**
      * The atlas sprite each cuboid part was painted with; null for a cuboid drawn
      * without {@code SpriteCoordinateExpander} and for every non-cuboid part.
      * Keyed alongside {@code partSides}: one cuboid is baked once and painted with
      * many sprites, and the rebuilt mesh bakes the sprite's UV rectangle.
      */
-    private final TextureAtlasSprite[] partSprite = new TextureAtlasSprite[MAX_PARTS];
-    private final int[] partTint = new int[MAX_PARTS];
+    private TextureAtlasSprite[] partSprite = new TextureAtlasSprite[MAX_PARTS];
+    private int[] partTint = new int[MAX_PARTS];
     /**
      * The terrain layer of the block item each part came from, or
      * {@link EntityRenderContext#NO_BLOCK_ITEM}; see {@link EntityRenderContext#getBlockItemLayer}.
      * Per part rather than per layer because two items rendered into one layer,
      * a held pane of glass and a held torch, must not share the answer.
      */
-    private final int[] partBlockItemLayer = new int[MAX_PARTS];
+    private int[] partBlockItemLayer = new int[MAX_PARTS];
     /**
      * The first vertex of a full item-card face in each part, or {@link #NO_VERTICES}.
      * A full face survives only when its sprite is too busy to rebuild, see
@@ -188,7 +202,7 @@ public class RemixCapturingConsumer implements VertexConsumer {
      * than the geometry, so the shell offset may thicken such a part but must not move
      * it in its plane; see {@link RemixEntitySubmitter#shellOffsets}.
      */
-    private final int[] partCardFace = new int[MAX_PARTS];
+    private int[] partCardFace = new int[MAX_PARTS];
     /**
      * Whether closing quads and strip runs are recorded as rigid parts. Every
      * provider-owned consumer records; the submitter's rebuild scratch only needs
@@ -217,6 +231,46 @@ public class RemixCapturingConsumer implements VertexConsumer {
         this.textureId = textureId;
         this.topology = topology;
         this.transientGeometry = transientGeometry;
+    }
+
+    // ---- Capacity ----
+
+    /** Doubles the per-vertex arrays, up to {@link #MAX_GROWN_VERTICES}; false at the ceiling. */
+    private boolean growVertexCapacity() {
+        if (vertexCapacity >= MAX_GROWN_VERTICES) return false;
+        int capacity = Math.min(vertexCapacity * 2, MAX_GROWN_VERTICES);
+        px = Arrays.copyOf(px, capacity);
+        py = Arrays.copyOf(py, capacity);
+        pz = Arrays.copyOf(pz, capacity);
+        nx = Arrays.copyOf(nx, capacity);
+        ny = Arrays.copyOf(ny, capacity);
+        nz = Arrays.copyOf(nz, capacity);
+        tu = Arrays.copyOf(tu, capacity);
+        tv = Arrays.copyOf(tv, capacity);
+        colors = Arrays.copyOf(colors, capacity);
+        boneIndices = Arrays.copyOf(boneIndices, capacity);
+        texcoordBoundsMin = Arrays.copyOf(texcoordBoundsMin, capacity);
+        texcoordBoundsMax = Arrays.copyOf(texcoordBoundsMax, capacity);
+        generatedNormals = Arrays.copyOf(generatedNormals, capacity);
+        vertexCapacity = capacity;
+        return true;
+    }
+
+    /** Doubles the per-part arrays, up to {@link #MAX_GROWN_PARTS}; false at the ceiling. */
+    private boolean growPartCapacity() {
+        if (partCapacity >= MAX_GROWN_PARTS) return false;
+        int capacity = Math.min(partCapacity * 2, MAX_GROWN_PARTS);
+        partStart = Arrays.copyOf(partStart, capacity);
+        partVertexCount = Arrays.copyOf(partVertexCount, capacity);
+        partBone = Arrays.copyOf(partBone, capacity);
+        partHash = Arrays.copyOf(partHash, capacity);
+        partSides = Arrays.copyOf(partSides, capacity);
+        partSprite = Arrays.copyOf(partSprite, capacity);
+        partTint = Arrays.copyOf(partTint, capacity);
+        partBlockItemLayer = Arrays.copyOf(partBlockItemLayer, capacity);
+        partCardFace = Arrays.copyOf(partCardFace, capacity);
+        partCapacity = capacity;
+        return true;
     }
 
     // ---- Bone detection ----
@@ -444,7 +498,7 @@ public class RemixCapturingConsumer implements VertexConsumer {
 
     private void finalizeVertex() {
         if (!vertexOpen) return;
-        if (vertexCount >= MAX_VERTICES) {
+        if (vertexCount >= vertexCapacity && !growVertexCapacity()) {
             resetOpenVertexState();
             return;
         }
@@ -1049,7 +1103,7 @@ public class RemixCapturingConsumer implements VertexConsumer {
                                         int boundsMin, int boundsMax,
                                         int boneIndex) {
         flushOpenVertex();
-        if (vertexCount >= MAX_VERTICES) return;
+        if (vertexCount >= vertexCapacity && !growVertexCapacity()) return;
 
         int i = vertexCount++;
         // boneIndex is resolved once per cuboid or quad by the caller, not
@@ -1095,7 +1149,7 @@ public class RemixCapturingConsumer implements VertexConsumer {
             partVertexCount[parts] += 4;
         } else {
             closeOpenPart();
-            if (parts >= MAX_PARTS) return;
+            if (parts >= partCapacity && !growPartCapacity()) return;
             partStart[parts] = start;
             partVertexCount[parts] = 4;
             partBone[parts] = bone;
@@ -1128,7 +1182,7 @@ public class RemixCapturingConsumer implements VertexConsumer {
         }
 
         closeOpenPart();
-        if (parts >= MAX_PARTS) return;
+        if (parts >= partCapacity && !growPartCapacity()) return;
         partStart[parts] = lastVertexIndex;
         partVertexCount[parts] = 1;
         partBone[parts] = bone;
@@ -1285,7 +1339,7 @@ public class RemixCapturingConsumer implements VertexConsumer {
     public void acceptCuboid(ModelPart.Polygon[] sides, int color, Matrix4f pose, TextureAtlasSprite sprite) {
         int boneIndex = beginCuboid(pose);
         closeOpenPart();
-        if (parts >= MAX_PARTS) return;
+        if (parts >= partCapacity && !growPartCapacity()) return;
         partStart[parts] = NO_VERTICES;
         partVertexCount[parts] = sides.length * VERTICES_PER_QUAD;
         partBone[parts] = boneIndex;
@@ -1312,7 +1366,7 @@ public class RemixCapturingConsumer implements VertexConsumer {
      */
     public void replayCuboidPart(ModelPart.Polygon[] sides, int color, int boneIndex, TextureAtlasSprite sprite) {
         closeOpenPart();
-        if (parts >= MAX_PARTS) return;
+        if (parts >= partCapacity && !growPartCapacity()) return;
         partStart[parts] = NO_VERTICES;
         partVertexCount[parts] = sides.length * VERTICES_PER_QUAD;
         partBone[parts] = boneIndex;
@@ -1444,8 +1498,8 @@ public class RemixCapturingConsumer implements VertexConsumer {
         // [0, parts] covers every slot that can hold one and clearing past it
         // costs barriered stores for nothing. The fill is a GC aid, not keying
         // correctness.
-        Arrays.fill(partSides, 0, Math.min(parts + 1, MAX_PARTS), null);
-        Arrays.fill(partSprite, 0, Math.min(parts + 1, MAX_PARTS), null);
+        Arrays.fill(partSides, 0, Math.min(parts + 1, partCapacity), null);
+        Arrays.fill(partSprite, 0, Math.min(parts + 1, partCapacity), null);
         pendingBakedQuadStart = NO_VERTICES;
         pendingBakedQuadCache = null;
         pendingBakedQuadVertexData = null;

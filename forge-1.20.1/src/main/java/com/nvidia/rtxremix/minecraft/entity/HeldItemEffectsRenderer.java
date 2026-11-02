@@ -45,16 +45,19 @@ import org.joml.Vector3fc;
  * layer the particle pipeline's own material, so a held flame and a placed
  * flame are lit by the same numbers.
  *
- * <p>Entity and block-entity capture spaces are world-aligned, so the camera's
- * rotation turns a quad toward the viewer in them and world up is +Y, the
+ * <p>The facing is 1.21's camera rotation, which these poses were built for: a quad
+ * so rotated has its front (+Z) toward the viewer and stands upright in view space.
+ * 1.20.1's {@code Camera.rotation()} is that rotation without its final half turn
+ * about +Y (1.21 builds it as {@code rotationYXZ(PI - yaw, -pitch, 0)} looking down
+ * -Z, 1.20.1 as {@code rotationYXZ(-yaw, pitch, 0)} looking down +Z), so it is
+ * restored here; see {@link #facing}. Entity and block-entity capture spaces are
+ * world-aligned, so that rotation applies as it is, and world up is +Y there, the
  * direction smoke rises. The first-person hand is not: 1.20.1's
- * {@code GameRenderer.renderItemInHand} resets the hand stack to identity, so the
- * hand is drawn in view space under the model-view (1.21 rooted it at the inverse
- * camera rotation and carried that rotation in the model-view instead). There the
- * facing is the camera's world rotation carried into view space, which is the half
- * turn about +Y of a camera looking down -Z, taken back through whatever the
- * model-view holds; {@link #firstPersonFacing} computes it, so the first-person
- * effects keep exactly the orientation they had on 1.21.
+ * {@code GameRenderer.renderItemInHand} resets the hand stack to identity, so the hand
+ * is drawn in view space under the model-view (1.21 rooted it at the inverse camera
+ * rotation and carried that rotation in the model-view instead). A quad facing the
+ * viewer is unrotated in view space, so the first-person facing is only the inverse
+ * of whatever the model-view holds, identity during vanilla's hand render.
  *
  * <p>Render thread only: the scratch objects are shared across calls.
  */
@@ -68,8 +71,8 @@ public final class HeldItemEffectsRenderer {
     private static final int SMOKE_ALPHA = Math.round(HeldItemSmoke.OPACITY * 255.0f);
     private static final int SMOKE_GREY = Math.round(ParticleTint.SOOT_GREY * 255.0f);
 
-    /** A camera-rotated quad's orientation in view space: a half turn about +Y. */
-    private static final Quaternionfc VIEW_SPACE_CAMERA_FACING = new Quaternionf().rotationY((float) Math.PI);
+    /** The half turn about +Y between 1.20.1's camera rotation and 1.21's. */
+    private static final Quaternionfc CAMERA_HALF_TURN = new Quaternionf().rotationY((float) Math.PI);
 
     private static final Matrix4f scratchPose = new Matrix4f();
     private static final Matrix4f scratchModelView = new Matrix4f();
@@ -113,9 +116,7 @@ public final class HeldItemEffectsRenderer {
         SpriteSet smokeSprites = spriteProvider(client, ParticleTypes.SMOKE);
         if (flameSprites == null || smokeSprites == null) return;
 
-        Quaternionfc facing = mode.firstPerson()
-                ? firstPersonFacing()
-                : client.gameRenderer.getMainCamera().rotation();
+        Quaternionfc facing = facing(mode, client);
         Quaternionfc frame = HeldItemFlame.riseFrame(mode, facing);
         double ticks = client.level.getGameTime() + client.getPartialTick();
         float phase = mode.ordinal();
@@ -158,15 +159,17 @@ public final class HeldItemEffectsRenderer {
     }
 
     /**
-     * The first-person facing in the hand stack's space: the view-space orientation a
-     * camera-rotated quad has, a half turn about +Y, through the inverse of the current
-     * model-view (identity during vanilla's hand render, kept general like the
-     * first-person pass's own eye). Allocation-free; the result lives in scratch.
+     * The rotation that turns a quad in its XY plane, front +Z, toward the viewer in the
+     * capture space of {@code mode}; see the class comment. Allocation-free; the result
+     * lives in scratch and is valid until the next call.
      */
-    private static Quaternionfc firstPersonFacing() {
-        scratchModelView.set(RenderSystem.getModelViewMatrix()).invert()
-                .getNormalizedRotation(scratchFacing);
-        return scratchFacing.mul(VIEW_SPACE_CAMERA_FACING);
+    private static Quaternionfc facing(ItemDisplayContext mode, Minecraft client) {
+        if (mode.firstPerson()) {
+            return scratchModelView.set(RenderSystem.getModelViewMatrix()).invert()
+                    .getNormalizedRotation(scratchFacing);
+        }
+        return scratchFacing.set(client.gameRenderer.getMainCamera().rotation())
+                .mul(CAMERA_HALF_TURN);
     }
 
     private static SpriteSet spriteProvider(Minecraft client, ParticleType<?> particle) {

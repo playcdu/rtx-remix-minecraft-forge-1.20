@@ -10,11 +10,26 @@ plugins {
     id 'org.spongepowered.mixin' version '0.7.+'
 }
 
-// The mod version has one source of truth, the root gradle.properties.
+def gitOutput = { List<String> command ->
+    providers.exec { commandLine command; ignoreExitValue = true }.standardOutput.asText.map { it.trim() }
+}
+def gitShortHash = gitOutput(['git', 'rev-parse', '--short=7', 'HEAD'])
+def gitBranch = gitOutput(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
+// Ignore untracked build outputs; wrapper sources are tracked with the mod.
+def gitDirty = gitOutput(['git', 'status', '--porcelain', '--untracked-files=no'])
+        .map { it.isEmpty() ? '' : '-dirty' }
+
+// The base version has one source of truth, the root gradle.properties. Each
+// build is stamped like the root build's, because NativeExtractor re-extracts
+// the runtime only when the mod version or architecture in its marker changes.
 def rootProperties = new Properties()
 file('../gradle.properties').withInputStream { rootProperties.load(it) }
+def buildTimestamp = java.time.ZonedDateTime.now(java.time.ZoneOffset.UTC)
+        .format(java.time.format.DateTimeFormatter.ofPattern('yyyyMMddHHmm'))
+def archProperty = project.findProperty('arch')
 group = 'com.nvidia.rtxremix.forge'
-version = rootProperties.getProperty('mod_version')
+version = "${rootProperties.getProperty('mod_version')}-${buildTimestamp}-${gitShortHash.get()}" +
+        "${gitDirty.get()}${archProperty ? '-' + archProperty : ''}"
 base { archivesName = 'rtx-remix-forge-1.20.1' }
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(17)
@@ -68,13 +83,11 @@ tasks.withType(JavaCompile).configureEach {
     options.release = 17
 }
 
-test { useJUnitPlatform() }
-
-def gitOutput = { List<String> command ->
-    providers.exec { commandLine command; ignoreExitValue = true }.standardOutput.asText.map { it.trim() }
+test {
+    useJUnitPlatform()
+    // Pin the per-frame install cap so tests don't depend on the CPU count
+    systemProperty 'rtxremix.chunk.maxInstalledColumnsPerFrame', '8'
 }
-def gitShortHash = gitOutput(['git', 'rev-parse', '--short=7', 'HEAD'])
-def gitBranch = gitOutput(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
 
 processResources {
     // Repository-only asset notes contain relative links, not runtime resources.

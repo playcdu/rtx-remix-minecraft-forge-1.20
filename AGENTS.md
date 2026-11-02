@@ -345,6 +345,42 @@ diluting the sampler's candidate pool.
   failures, debug views, and worktree setup. Debug-view indices belong to the
   matching dxvk-remix source, not this repository.
 
+## Forge 1.20.1 Port
+
+`forge-1.20.1/` is a standalone Forge 47.4 build of the renderer for Minecraft
+1.20.1, for the Society: Sunlit Valley modpack. Like `forge-1.12.2/` it has its
+own Gradle wrapper, compiles `rtxremix-java/src` directly, and never touches the
+root build; its [README](forge-1.20.1/README.md) covers building, packaging,
+installing and the pack's mod interactions. Its sources mirror this tree package
+for package and class for class, in official Mojang names and Java 17, so port a
+behaviour change to both trees in the same pull request where it applies. The
+Architecture and Invariants above hold for it, with these differences:
+
+- Embeddium (required) owns sections, visibility and the GL terrain draw. Terrain
+  is captured in `EmbeddiumMeshingTaskMixin` on Embeddium's meshing task, empty
+  sections reach `ChunkManager.onSectionSettledEmpty` from
+  `EmbeddiumRenderSectionManagerMixin`, and a recapture snapshots and requeues
+  Embeddium's built sections through `WorldRendererTerrainAccess`
+  (`EmbeddiumLevelRendererMixin`) around `LevelRenderer.allChanged()`. The
+  vanilla-pipeline classes and the chunk-pacing, light-snapshot, re-flag and
+  worker-cap policies are not ported.
+- Mixins whose injection points sit in methods Embeddium overwrites use
+  priority 1100 so they apply to Embeddium's body. Prefer MixinExtras wrappers
+  over `@Redirect`, because the pack's other mods redirect many of the same
+  calls. The MixinExtras annotation processor must stay ahead of Mixin's in
+  `forge-1.20.1/build.gradle`, or wrapper targets never reach the refmap.
+- Registration, networking, commands and events are Forge's: `RtxRemixForgeMod`
+  registers common content through `RtxRemixCommonMod` and reaches
+  `RtxRemixMod` only on the client. The network channel accepts a server
+  without the mod, and Forge then drops the mod's registry entries for that
+  connection, so code that runs after start-up never calls
+  `RegistryObject.get()` unguarded.
+- Create's Flywheel backend reports itself off while Remix renders
+  (`FlywheelBackendMixin`), so Create draws through renderers the capture sees.
+- `NativeExtractor` reads the same `native/` payload layout from the mod file
+  through Forge's mod-file API; every build is stamped with its time and commit
+  so a new JAR re-extracts.
+
 ## Integrated JNI Wrapper
 
 `rtxremix-java/` is a Minecraft-agnostic Java facade and JNI shim over the
