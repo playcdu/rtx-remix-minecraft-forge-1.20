@@ -90,7 +90,9 @@ public class RemixAPI {
             case 126: return "Windows error 126: a DLL the runtime depends on was not found";
             case 127: return "Windows error 127: a DLL the runtime depends on lacks a function it needs";
             case 193: return "Windows error 193: a runtime DLL is not a valid image for this architecture";
-            case 1114: return "Windows error 1114: a runtime DLL failed to initialize";
+            case 1114: return "Windows error 1114: a runtime DLL failed to initialize, most often because"
+                    + " the Java runtime loaded an msvcp140.dll older than 14.40 (look in its bin folder);"
+                    + " run the game on a current Java build";
             default: return "Windows error " + code;
         }
     }

@@ -114,6 +114,13 @@ unpacks `remix-sdk\`, `rtx.conf`, the runtime textures and the `rtx-remix\`
 conf payload into the game directory, as described in
 [AGENTS.md](../AGENTS.md#runtime-and-install-model).
 
+Run the instance on a current Java 17. The runtime's libraries are built with
+Visual Studio 2022 17.12 or newer and fail to initialize (Windows error 1114 in
+`logs/latest.log`) next to the Visual C++ runtime older than 14.40 that some
+Java builds ship in their `bin` folder. CurseForge's bundled Java 17.0.8 ships
+14.27; current Microsoft Build of OpenJDK 17 (14.44) and Temurin 17 (14.40)
+builds work. Point the launcher's Java path at the newer `javaw.exe`.
+
 Keep the pack's own memory setting: Sunlit Valley needs far more heap than the
 2 GB the Fabric installer sets for vanilla. The G1 options in
 `RECOMMENDED_JVM_ARGS` ([JVM Arguments](../docs/TUNING.md#jvm-arguments)) apply
