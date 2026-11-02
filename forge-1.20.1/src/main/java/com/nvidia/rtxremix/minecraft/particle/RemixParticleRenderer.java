@@ -129,7 +129,12 @@ public class RemixParticleRenderer {
 
         BlockTextureManager blockTexMgr = renderer.getTextureManager();
         Quaternionf camRot = client.gameRenderer.getMainCamera().rotation();
-        float qx = camRot.x, qy = camRot.y, qz = camRot.z, qw = camRot.w;
+        // The billboard basis was written against 1.21's camera rotation, which is
+        // 1.20.1's followed by a half turn about +Y (1.21 builds it as
+        // rotationYXZ(PI - yaw, -pitch, 0) and flips its quad corners to match). The
+        // product camRot * (0, 1, 0, 0) is written out so the basis, and therefore every
+        // corner and its UV, lands where 1.20.1's SingleQuadParticle.render puts it.
+        float qx = -camRot.z, qy = camRot.w, qz = camRot.x, qw = -camRot.y;
         ParticleBillboardBasis billboardBasis = ParticleBillboardBasis.fromCamera(qx, qy, qz, qw);
 
         for (var entry : particleMap.entrySet()) {

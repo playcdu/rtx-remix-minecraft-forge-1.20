@@ -89,7 +89,12 @@ public final class RemixWeatherRenderer {
     }
 
     public void updateCamera(Camera camera, float fovYDegrees, float aspect) {
-        Quaternionf cameraRotation = camera.rotation().conjugate(new Quaternionf());
+        // The view rotation vanilla draws weather under: 1.20.1's GameRenderer builds it
+        // as XP(pitch) * YP(yaw + 180), which is the conjugate of the camera rotation
+        // followed by a half turn about +Y (camera.rotation() * (0, 1, 0, 0)).
+        Quaternionf rotation = camera.rotation();
+        Quaternionf cameraRotation = new Quaternionf(-rotation.z, rotation.w, rotation.x, -rotation.y)
+                .conjugate();
         modelView = new Matrix4f().rotation(cameraRotation);
         projection = new Matrix4f().perspective(
                 (float) Math.toRadians(fovYDegrees),

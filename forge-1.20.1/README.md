@@ -25,8 +25,18 @@ only by launching it on Windows with an RTX GPU.
 - **Create and other Flywheel users** draw kinetic blocks, belts, contraptions
   and trains with GPU instancing, which Remix cannot see. While Remix renders,
   Flywheel's backend reports itself off, so Create falls back to its ordinary
-  renderers, which the capture handles. Toggling RTX reloads the world
-  renderer, which Flywheel follows.
+  block-entity and entity renderers, which the capture handles. Toggling RTX
+  reloads the world renderer; Flywheel drops or rebuilds its instances with it.
+  Create pre-transforms every vertex it draws on that path, so each rotating
+  shaft, cog or sail is a new Remix mesh every frame: a busy factory costs more
+  than the same blocks standing still. Create also bakes its own side shading
+  into vertex colour, so its machines can look slightly darker than vanilla
+  blocks under path tracing.
+- **Entity Model Features and Entity Texture Features** keep working: custom
+  models and random texture variants are captured. ETF's emissive overlay
+  layers are drawn only into ETF's own buffers, so they do not glow in Remix.
+- **flerovium** and Embeddium's own entity and particle fast paths step aside
+  for the capture, which never presents itself as an Embeddium vertex writer.
 - **particlerain** cancels vanilla rain and snow in the pack's configuration,
   so weather reaches Remix as its particles: falling sprites rather than
   stretched streaks, and upright ripples. There is no rain refraction pass then.
