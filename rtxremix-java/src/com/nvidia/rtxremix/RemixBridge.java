@@ -20,12 +20,19 @@ public final class RemixBridge {
     private RemixBridge() {}
 
     /**
-     * Loads d3d9.dll via SetDllDirectory + LoadLibrary, calls
-     * remixapi_InitializeLibrary to fill the vtable.
+     * Loads d3d9.dll with its dependencies resolved beside it (falling back to
+     * SetDllDirectory + LoadLibrary), calls remixapi_InitializeLibrary to fill
+     * the vtable.
      *
      * @return REMIXAPI_ERROR_CODE_SUCCESS (0) on success
      */
     public static native int initialize(String dllPath);
+
+    /**
+     * @return the Win32 error code of the last failed {@link #initialize} load
+     *         of d3d9.dll, or 0 when the last load did not fail
+     */
+    public static native int lastLoadError();
 
     // ─── process command line ────────────────────────────────────────────
 

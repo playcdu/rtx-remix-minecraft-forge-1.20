@@ -69,6 +69,10 @@ public class RemixAPI {
     public static RemixAPI load(String dllPath) {
         java.io.File dllFile = bindBridge(dllPath);
         int result = RemixBridge.initialize(dllFile.getAbsolutePath());
+        if (result == ErrorCode.LOAD_LIBRARY_FAILURE) {
+            throw new RemixException("Failed to load the Remix runtime ("
+                    + describeWin32Error(RemixBridge.lastLoadError()) + ")", result);
+        }
         if (result != ErrorCode.SUCCESS) {
             throw new RemixException("Failed to initialize Remix library", result);
         }
@@ -76,6 +80,19 @@ public class RemixAPI {
         RemixAPI api = new RemixAPI();
         api.initialized = true;
         return api;
+    }
+
+    /** Names the Win32 errors a runtime load reports in practice. */
+    static String describeWin32Error(int code) {
+        switch (code) {
+            case 0: return "no Windows error recorded";
+            case 5: return "Windows error 5: access denied, often antivirus blocking a runtime DLL";
+            case 126: return "Windows error 126: a DLL the runtime depends on was not found";
+            case 127: return "Windows error 127: a DLL the runtime depends on lacks a function it needs";
+            case 193: return "Windows error 193: a runtime DLL is not a valid image for this architecture";
+            case 1114: return "Windows error 1114: a runtime DLL failed to initialize";
+            default: return "Windows error " + code;
+        }
     }
 
     /**

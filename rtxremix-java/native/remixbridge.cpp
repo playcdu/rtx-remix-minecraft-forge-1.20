@@ -352,6 +352,8 @@ static bool initTracyFunctionsLocked() {
 // ════════════════════════════════════════════════════════════════════════════
 
 static HMODULE          g_remixDll   = nullptr;
+// Win32 error of the last failed runtime load, for the Java exception message.
+static DWORD            g_lastLoadError = 0;
 static remixapi_Interface g_remix    = {};
 static bool             g_inited     = false;
 
@@ -508,10 +510,24 @@ static jint initializeRuntime(const wchar_t* dllPath)
 
     if (parentDir[0] != L'\0') {
         SetDllDirectoryW(parentDir);
+        // Also a user directory, so the runtime's own later loads (USD plugins)
+        // still find the SDK if another library resets SetDllDirectory.
+        AddDllDirectory(parentDir);
     }
 
-    g_remixDll = LoadLibraryW(dllPath);
+    // Resolve the runtime's dependencies beside it whatever the process-wide
+    // search state is: a host with many native libraries (a modpack) can change
+    // SetDllDirectory or SetDefaultDllDirectories from another thread while the
+    // runtime's large dependency tree loads. The plain load stays as a fallback.
+    g_lastLoadError = 0;
+    g_remixDll = LoadLibraryExW(dllPath, nullptr,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (!g_remixDll) {
+        g_lastLoadError = GetLastError();
+        g_remixDll = LoadLibraryW(dllPath);
+    }
+    if (!g_remixDll) {
+        if (g_lastLoadError == 0) g_lastLoadError = GetLastError();
         return REMIXAPI_ERROR_CODE_LOAD_LIBRARY_FAILURE;
     }
 
@@ -579,6 +595,12 @@ __declspec(dllexport) jint remixbridge_probe_runtime(const wchar_t* dllPath)
         return REMIXAPI_ERROR_CODE_LOAD_LIBRARY_FAILURE;
     }
     return initializeRuntime(dllPath);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_nvidia_rtxremix_RemixBridge_lastLoadError(JNIEnv*, jclass)
+{
+    return (jint)g_lastLoadError;
 }
 
 JNIEXPORT jint JNICALL
