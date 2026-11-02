@@ -112,7 +112,7 @@ class CloudRendererTest {
                         0,
                         new CloudMeshGenerator.GeneratedMesh(
                                 new float[0], new int[]{0, 0, 0}, 0L))));
-        assertEquals(creationFailure, paletteFailure.getException());
+        assertEquals(creationFailure, paletteFailure.getCause());
         assertFalse(procedural.shouldSuppressVanillaClouds());
         assertFalse(procedural.publishPaletteResult(
                 new CloudRenderer.CompletedPaletteGeneration(paletteEpoch)));
@@ -130,7 +130,7 @@ class CloudRendererTest {
                         11L,
                         new VanillaCloudMeshGenerator.GeneratedMesh(
                                 new float[0], new int[]{0, 0, 0}, 0L))));
-        assertEquals(creationFailure, vanillaFailure.getException());
+        assertEquals(creationFailure, vanillaFailure.getCause());
         assertFalse(vanilla.shouldSuppressVanillaClouds());
     }
 }

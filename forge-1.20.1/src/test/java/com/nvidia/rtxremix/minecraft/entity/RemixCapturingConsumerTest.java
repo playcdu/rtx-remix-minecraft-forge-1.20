@@ -62,7 +62,7 @@ class RemixCapturingConsumerTest {
         assertEquals(-0.01f, consumer.getPz()[0]);
         assertEquals(0, consumer.getBoneIndices()[0]);
         assertEquals(1, context.getBoneCount());
-        assertEquals(pose, context.getBoneTransforms().getFirst());
+        assertEquals(pose, context.getBoneTransforms().get(0));
     }
 
     private static int[] quadVertexData(float[][] positions) {

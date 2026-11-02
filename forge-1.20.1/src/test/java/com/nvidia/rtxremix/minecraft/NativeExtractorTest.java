@@ -64,10 +64,10 @@ class NativeExtractorTest {
 
     @Test
     void extractTreeWithoutAKeptCountReplacesExistingFiles(@TempDir Path tmp) throws IOException {
-        Path src = Files.createDirectoriesSafe(tmp.resolve("src"));
-        Path dst = Files.createDirectoriesSafe(tmp.resolve("dst"));
-        Files.writeUtf(src.resolve("d3d9.dll"), "shipped");
-        Files.writeUtf(dst.resolve("d3d9.dll"), "stale");
+        Path src = Files.createDirectories(tmp.resolve("src"));
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+        Files.writeString(src.resolve("d3d9.dll"), "shipped");
+        Files.writeString(dst.resolve("d3d9.dll"), "stale");
 
         AtomicInteger files = new AtomicInteger();
         AtomicLong bytes = new AtomicLong();
@@ -83,11 +83,11 @@ class NativeExtractorTest {
         // The gameplay conf payload is edited in place by lighting authors, and
         // every build makes the version marker stale. Re-extraction must not
         // revert their tuning, while still delivering profiles they don't have.
-        Path src = Files.createDirectoriesSafe(tmp.resolve("src/confs/zones"));
-        Path dst = Files.createDirectoriesSafe(tmp.resolve("dst/confs/zones"));
-        Files.writeUtf(src.resolve("cave.conf"), "shipped default");
-        Files.writeUtf(src.resolve("swamp.conf"), "newly shipped profile");
-        Files.writeUtf(dst.resolve("cave.conf"), "author's hand-tuned values");
+        Path src = Files.createDirectories(tmp.resolve("src/confs/zones"));
+        Path dst = Files.createDirectories(tmp.resolve("dst/confs/zones"));
+        Files.writeString(src.resolve("cave.conf"), "shipped default");
+        Files.writeString(src.resolve("swamp.conf"), "newly shipped profile");
+        Files.writeString(dst.resolve("cave.conf"), "author's hand-tuned values");
 
         AtomicInteger files = new AtomicInteger();
         AtomicLong bytes = new AtomicLong();
@@ -104,9 +104,9 @@ class NativeExtractorTest {
     void extractTreeWithAKeptCountRestoresADeletedFileToItsShippedDefault(@TempDir Path tmp) throws IOException {
         // The documented escape hatch: remove the file, relaunch, get the
         // shipped version back.
-        Path src = Files.createDirectoriesSafe(tmp.resolve("src"));
-        Path dst = Files.createDirectoriesSafe(tmp.resolve("dst"));
-        Files.writeUtf(src.resolve("water.conf"), "shipped default");
+        Path src = Files.createDirectories(tmp.resolve("src"));
+        Path dst = Files.createDirectories(tmp.resolve("dst"));
+        Files.writeString(src.resolve("water.conf"), "shipped default");
 
         AtomicInteger files = new AtomicInteger();
         AtomicLong bytes = new AtomicLong();
@@ -120,11 +120,11 @@ class NativeExtractorTest {
     @Test
     void matchingMarkerWithMissingRuntimeDllReextractsTheSdk(@TempDir Path tmp) throws IOException {
         Path nativeRoot = createNativePayload(tmp);
-        Path gameDir = Files.createDirectoriesSafe(tmp.resolve("game"));
+        Path gameDir = Files.createDirectories(tmp.resolve("game"));
         NativeExtractor.extractIfNeeded(nativeRoot, gameDir, "1.0", "remix-sdk-win64", INLINE_CLEANUP);
         Files.delete(gameDir.resolve("remix-sdk/d3d9.dll"));
-        Files.writeUtf(gameDir.resolve("remix-sdk/runtime.dll"), "stale runtime");
-        Files.writeUtf(gameDir.resolve("rtx.conf"), "stale defaults");
+        Files.writeString(gameDir.resolve("remix-sdk/runtime.dll"), "stale runtime");
+        Files.writeString(gameDir.resolve("rtx.conf"), "stale defaults");
 
         NativeExtractor.extractIfNeeded(nativeRoot, gameDir, "1.0", "remix-sdk-win64", INLINE_CLEANUP);
 
@@ -137,8 +137,8 @@ class NativeExtractorTest {
     @Test
     void matchingMarkerWithMissingSdkDirectoryReextractsTheSdk(@TempDir Path tmp) throws IOException {
         Path nativeRoot = createNativePayload(tmp);
-        Path gameDir = Files.createDirectoriesSafe(tmp.resolve("game"));
-        Files.writeUtf(gameDir.resolve(".rtx-remix-version"), "1.0|remix-sdk-win64");
+        Path gameDir = Files.createDirectories(tmp.resolve("game"));
+        Files.writeString(gameDir.resolve(".rtx-remix-version"), "1.0|remix-sdk-win64");
 
         NativeExtractor.extractIfNeeded(nativeRoot, gameDir, "1.0", "remix-sdk-win64", INLINE_CLEANUP);
 
@@ -150,11 +150,11 @@ class NativeExtractorTest {
     void matchingMarkerRestoresADeletedShippedConfWithoutReplacingTheSdk(@TempDir Path tmp)
             throws IOException {
         Path nativeRoot = createNativePayload(tmp);
-        Path gameDir = Files.createDirectoriesSafe(tmp.resolve("game"));
+        Path gameDir = Files.createDirectories(tmp.resolve("game"));
         NativeExtractor.extractIfNeeded(nativeRoot, gameDir, "1.0", "remix-sdk-win64", INLINE_CLEANUP);
         Path waterConf = gameDir.resolve("rtx-remix/mods/minecraft-logic/confs/water.conf");
         Files.delete(waterConf);
-        Files.writeUtf(gameDir.resolve("remix-sdk/d3d9.dll"), "existing runtime");
+        Files.writeString(gameDir.resolve("remix-sdk/d3d9.dll"), "existing runtime");
 
         NativeExtractor.extractIfNeeded(nativeRoot, gameDir, "1.0", "remix-sdk-win64", INLINE_CLEANUP);
 
@@ -165,11 +165,11 @@ class NativeExtractorTest {
     @Test
     void matchingMarkerNeverOverwritesAnEditedConf(@TempDir Path tmp) throws IOException {
         Path nativeRoot = createNativePayload(tmp);
-        Path gameDir = Files.createDirectoriesSafe(tmp.resolve("game"));
+        Path gameDir = Files.createDirectories(tmp.resolve("game"));
         NativeExtractor.extractIfNeeded(nativeRoot, gameDir, "1.0", "remix-sdk-win64", INLINE_CLEANUP);
         Path waterConf = gameDir.resolve("rtx-remix/mods/minecraft-logic/confs/water.conf");
-        Files.writeUtf(waterConf, "author's water");
-        Files.writeUtf(gameDir.resolve("rtx.conf"), "edited defaults");
+        Files.writeString(waterConf, "author's water");
+        Files.writeString(gameDir.resolve("rtx.conf"), "edited defaults");
 
         NativeExtractor.extractIfNeeded(nativeRoot, gameDir, "1.0", "remix-sdk-win64", INLINE_CLEANUP);
 
@@ -188,9 +188,9 @@ class NativeExtractorTest {
         // A JAR dropped into mods/ by a launcher has no installer to copy the
         // runtime textures, so the mod must put them where it loads them from.
         Path nativeRoot = createNativePayload(tmp);
-        Path gameDir = Files.createDirectoriesSafe(tmp.resolve("game"));
-        Path textures = Files.createDirectoriesSafe(gameDir.resolve("textures"));
-        Files.writeUtf(textures.resolve("unrelated.png"), "someone else's file");
+        Path gameDir = Files.createDirectories(tmp.resolve("game"));
+        Path textures = Files.createDirectories(gameDir.resolve("textures"));
+        Files.writeString(textures.resolve("unrelated.png"), "someone else's file");
 
         NativeExtractor.extractIfNeeded(nativeRoot, gameDir, "1.0", "remix-sdk-win64", INLINE_CLEANUP);
 
@@ -206,11 +206,11 @@ class NativeExtractorTest {
         // Textures are mod-owned, unlike the author-owned conf payload: a
         // release that replaces a texture must reach installs that have the old one.
         Path nativeRoot = createNativePayload(tmp);
-        Path gameDir = Files.createDirectoriesSafe(tmp.resolve("game"));
-        Path waterNormals = Files.createDirectoriesSafe(gameDir.resolve("textures"))
+        Path gameDir = Files.createDirectories(tmp.resolve("game"));
+        Path waterNormals = Files.createDirectories(gameDir.resolve("textures"))
                 .resolve("water_normals_flipbook.dds");
-        Files.writeUtf(waterNormals, "previous release's water normals");
-        Files.writeUtf(gameDir.resolve(".rtx-remix-version"), "0.9|remix-sdk-win64");
+        Files.writeString(waterNormals, "previous release's water normals");
+        Files.writeString(gameDir.resolve(".rtx-remix-version"), "0.9|remix-sdk-win64");
 
         NativeExtractor.extractIfNeeded(nativeRoot, gameDir, "1.0", "remix-sdk-win64", INLINE_CLEANUP);
 
@@ -220,11 +220,11 @@ class NativeExtractorTest {
     @Test
     void matchingMarkerRestoresADeletedTextureWithoutReplacingTheSdk(@TempDir Path tmp) throws IOException {
         Path nativeRoot = createNativePayload(tmp);
-        Path gameDir = Files.createDirectoriesSafe(tmp.resolve("game"));
+        Path gameDir = Files.createDirectories(tmp.resolve("game"));
         NativeExtractor.extractIfNeeded(nativeRoot, gameDir, "1.0", "remix-sdk-win64", INLINE_CLEANUP);
         Path waterNormals = gameDir.resolve("textures/water_normals_flipbook.dds");
         Files.delete(waterNormals);
-        Files.writeUtf(gameDir.resolve("remix-sdk/d3d9.dll"), "existing runtime");
+        Files.writeString(gameDir.resolve("remix-sdk/d3d9.dll"), "existing runtime");
 
         NativeExtractor.extractIfNeeded(nativeRoot, gameDir, "1.0", "remix-sdk-win64", INLINE_CLEANUP);
 
@@ -233,15 +233,15 @@ class NativeExtractorTest {
     }
 
     private static Path createNativePayload(Path tmp) throws IOException {
-        Path nativeRoot = Files.createDirectoriesSafe(tmp.resolve("native"));
-        Path sdk = Files.createDirectoriesSafe(nativeRoot.resolve("remix-sdk-win64"));
-        Files.writeUtf(sdk.resolve("d3d9.dll"), "shipped runtime");
-        Files.writeUtf(sdk.resolve("runtime.dll"), "shipped companion");
-        Files.writeUtf(nativeRoot.resolve("rtx.conf"), "shipped defaults");
-        Path confs = Files.createDirectoriesSafe(nativeRoot.resolve("rtx-remix/mods/minecraft-logic/confs"));
-        Files.writeUtf(confs.resolve("water.conf"), "shipped water");
-        Path textures = Files.createDirectoriesSafe(nativeRoot.resolve("textures"));
-        Files.writeUtf(textures.resolve("water_normals_flipbook.dds"), "shipped water normals");
+        Path nativeRoot = Files.createDirectories(tmp.resolve("native"));
+        Path sdk = Files.createDirectories(nativeRoot.resolve("remix-sdk-win64"));
+        Files.writeString(sdk.resolve("d3d9.dll"), "shipped runtime");
+        Files.writeString(sdk.resolve("runtime.dll"), "shipped companion");
+        Files.writeString(nativeRoot.resolve("rtx.conf"), "shipped defaults");
+        Path confs = Files.createDirectories(nativeRoot.resolve("rtx-remix/mods/minecraft-logic/confs"));
+        Files.writeString(confs.resolve("water.conf"), "shipped water");
+        Path textures = Files.createDirectories(nativeRoot.resolve("textures"));
+        Files.writeString(textures.resolve("water_normals_flipbook.dds"), "shipped water normals");
         return nativeRoot;
     }
 
@@ -249,9 +249,9 @@ class NativeExtractorTest {
     void restoreMissingRtxConfWritesTheShippedConfWhenTheLiveCopyWasDeleted(@TempDir Path tmp) throws IOException {
         // A matching version marker skips extraction, so this is the only path
         // that puts rtx.conf back after something deletes it.
-        Path nativeRoot = Files.createDirectoriesSafe(tmp.resolve("native"));
-        Path gameDir = Files.createDirectoriesSafe(tmp.resolve("game"));
-        Files.writeUtf(nativeRoot.resolve("rtx.conf"), "rtx.showUICursor = false");
+        Path nativeRoot = Files.createDirectories(tmp.resolve("native"));
+        Path gameDir = Files.createDirectories(tmp.resolve("game"));
+        Files.writeString(nativeRoot.resolve("rtx.conf"), "rtx.showUICursor = false");
 
         assertTrue(NativeExtractor.restoreMissingRtxConf(nativeRoot, gameDir));
         assertEquals("rtx.showUICursor = false", Files.readString(gameDir.resolve("rtx.conf")));
@@ -261,10 +261,10 @@ class NativeExtractorTest {
     void restoreMissingRtxConfLeavesAnExistingConfAlone(@TempDir Path tmp) throws IOException {
         // Restoring runs on every version-stable launch, so it must never
         // overwrite a conf someone is editing between launches.
-        Path nativeRoot = Files.createDirectoriesSafe(tmp.resolve("native"));
-        Path gameDir = Files.createDirectoriesSafe(tmp.resolve("game"));
-        Files.writeUtf(nativeRoot.resolve("rtx.conf"), "shipped");
-        Files.writeUtf(gameDir.resolve("rtx.conf"), "hand tuned");
+        Path nativeRoot = Files.createDirectories(tmp.resolve("native"));
+        Path gameDir = Files.createDirectories(tmp.resolve("game"));
+        Files.writeString(nativeRoot.resolve("rtx.conf"), "shipped");
+        Files.writeString(gameDir.resolve("rtx.conf"), "hand tuned");
 
         assertFalse(NativeExtractor.restoreMissingRtxConf(nativeRoot, gameDir));
         assertEquals("hand tuned", Files.readString(gameDir.resolve("rtx.conf")));
@@ -273,7 +273,7 @@ class NativeExtractorTest {
     @Test
     void restoreMissingRtxConfIsANoOpWhenTheJarCarriesNoNativePayload(@TempDir Path tmp) throws IOException {
         // Development runs load classes without a bundled native/ root.
-        Path gameDir = Files.createDirectoriesSafe(tmp.resolve("game"));
+        Path gameDir = Files.createDirectories(tmp.resolve("game"));
 
         assertFalse(NativeExtractor.restoreMissingRtxConf(tmp.resolve("absent-native"), gameDir));
         assertFalse(Files.exists(gameDir.resolve("rtx.conf")));

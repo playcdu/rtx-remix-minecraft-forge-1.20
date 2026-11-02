@@ -338,7 +338,7 @@ class RemixInputGateTest {
      * when they fit, and the size they need either way.
      */
     private static int resolve(String value, byte[] buffer) {
-        byte[] resolved = (value + '\0').asByteArray(StandardCharsets.UTF_8);
+        byte[] resolved = (value + '\0').getBytes(StandardCharsets.UTF_8);
         if (resolved.length <= buffer.length) {
             System.arraycopy(resolved, 0, buffer, 0, resolved.length);
         }

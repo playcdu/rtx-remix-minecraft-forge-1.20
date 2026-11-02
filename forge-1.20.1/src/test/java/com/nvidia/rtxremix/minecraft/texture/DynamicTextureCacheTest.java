@@ -96,7 +96,7 @@ class DynamicTextureCacheTest {
         ResourceLocation id = new ResourceLocation("minecraft", "dynamic/closed-map");
         TextureManager manager = new TextureManager(null);
         DynamicTexture texture = new DynamicTexture(new NativeImage(1, 1, true));
-        manager.registerTexture(id, texture);
+        manager.register(id, texture);
         DynamicTextureCache.onRegisterTexture(id, texture, texture.getPixels());
         assertNotNull(DynamicTextureCache.get(id));
 
@@ -163,7 +163,7 @@ class DynamicTextureCacheTest {
         texture = null;
         for (int attempt = 0; attempt < 20 && collected.get() != null; attempt++) {
             System.gc();
-            Thread.startSleeping(10L);
+            Thread.sleep(10L);
         }
         assumeTrue(collected.get() == null, "the JVM did not collect the released texture");
 

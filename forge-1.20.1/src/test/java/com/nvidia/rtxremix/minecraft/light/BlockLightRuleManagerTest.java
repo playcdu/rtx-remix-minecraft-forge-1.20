@@ -72,16 +72,16 @@ class BlockLightRuleManagerTest {
         lightsField.setAccessible(true);
         List<?> lights = (List<?>) lightsField.get(rule);
         assertEquals(1, lights.size());
-        Object spec = lights.getFirst();
+        Object spec = lights.get(0);
 
         for (var expected : Map.of(
                 "shape", LightShape.RECT,
                 "xSize", 1.0f,
                 "ySize", 1.0f,
                 "intensity", 12.0f).entrySet()) {
-            Field field = spec.getClass().getDeclaredField(expected.getMetadataSectionName());
+            Field field = spec.getClass().getDeclaredField(expected.getKey());
             field.setAccessible(true);
-            assertEquals(expected.getValue(), field.get(spec), expected.getMetadataSectionName());
+            assertEquals(expected.getValue(), field.get(spec), expected.getKey());
         }
         String[] components = {"x", "y", "z"};
         for (var expected : Map.of(
@@ -89,7 +89,7 @@ class BlockLightRuleManagerTest {
                 "xAxis", new float[]{1.0f, 0.0f, 0.0f},
                 "yAxis", new float[]{0.0f, 0.0f, 1.0f},
                 "direction", new float[]{0.0f, 1.0f, 0.0f}).entrySet()) {
-            Field field = spec.getClass().getDeclaredField(expected.getMetadataSectionName());
+            Field field = spec.getClass().getDeclaredField(expected.getKey());
             field.setAccessible(true);
             Object vectorSpec = field.get(spec);
             Field valueField = vectorSpec.getClass().getDeclaredField("value");
@@ -99,7 +99,7 @@ class BlockLightRuleManagerTest {
                 Field component = vector.getClass().getDeclaredField(components[i]);
                 component.setAccessible(true);
                 assertEquals(expected.getValue()[i], component.getFloat(vector),
-                        expected.getMetadataSectionName() + "." + components[i]);
+                        expected.getKey() + "." + components[i]);
             }
         }
     }
@@ -250,7 +250,7 @@ class BlockLightRuleManagerTest {
     }
 
     private static Resource jsonResource(String packId, String json) {
-        IoSupplier<InputStream> input = () -> new ByteArrayInputStream(json.asByteArray(StandardCharsets.UTF_8));
+        IoSupplier<InputStream> input = () -> new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8));
         return new Resource(new FakePack(packId), input);
     }
 
@@ -347,7 +347,7 @@ class BlockLightRuleManagerTest {
         @Override
         public Optional<Resource> getResource(ResourceLocation identifier) {
             List<Resource> found = resources.get(identifier);
-            return found == null || found.isEmpty() ? Optional.empty() : Optional.of(found.getLast());
+            return found == null || found.isEmpty() ? Optional.empty() : Optional.of(found.get(found.size() - 1));
         }
 
         @Override
@@ -363,9 +363,9 @@ class BlockLightRuleManagerTest {
         @Override
         public Map<ResourceLocation, List<Resource>> listResourceStacks(String startingPath, Predicate<ResourceLocation> allowedPathPredicate) {
             return resources.entrySet().stream()
-                    .filter(entry -> entry.getMetadataSectionName().getPath().startsWith(startingPath))
-                    .filter(entry -> allowedPathPredicate.test(entry.getMetadataSectionName()))
-                    .collect(Collectors.toMap(Map.Entry::getMetadataSectionName, Map.Entry::getValue));
+                    .filter(entry -> entry.getKey().getPath().startsWith(startingPath))
+                    .filter(entry -> allowedPathPredicate.test(entry.getKey()))
+                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         }
 
         @Override

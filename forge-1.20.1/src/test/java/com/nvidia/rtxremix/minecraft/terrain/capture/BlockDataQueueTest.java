@@ -78,7 +78,7 @@ class BlockDataQueueTest {
         assertNotEquals(oldCapture.chunkToken(), reloadedCapture.chunkToken());
         BlockDataQueue.enqueue(data, reloadedCapture);
         assertEquals(1, BlockDataQueue.drain(drained));
-        assertEquals(List.of(data), drained.cube().map(BlockDataQueue.QueuedCapture::data).toList());
+        assertEquals(List.of(data), drained.stream().map(BlockDataQueue.QueuedCapture::data).toList());
     }
 
     @Test
@@ -95,7 +95,7 @@ class BlockDataQueueTest {
         List<BlockDataQueue.QueuedCapture> drained = new ArrayList<>();
         assertEquals(1, BlockDataQueue.drain(drained));
         assertEquals(List.of(retained),
-                drained.cube().map(BlockDataQueue.QueuedCapture::data).toList());
+                drained.stream().map(BlockDataQueue.QueuedCapture::data).toList());
         assertEquals(0, BlockDataQueue.pendingCount());
         assertEquals(0, BlockDataQueue.pendingBytes());
     }
@@ -104,13 +104,13 @@ class BlockDataQueueTest {
     void unloadedCoordinatesAreEvictedAndFreshCapturesDoNotReuseTokens() {
         BlockDataQueue.CaptureToken liveCapture = BlockDataQueue.beginCapture(-40, 25);
         Set<Long> issuedTokens = new HashSet<>();
-        assertTrue(issuedTokens.offset(liveCapture.chunkToken()));
+        assertTrue(issuedTokens.add(liveCapture.chunkToken()));
 
         for (int i = 0; i < 10_000; i++) {
             int cx = 10_000 + i;
             int cz = -20_000 - i;
             BlockDataQueue.CaptureToken capture = BlockDataQueue.beginCapture(cx, cz);
-            assertTrue(issuedTokens.offset(capture.chunkToken()));
+            assertTrue(issuedTokens.add(capture.chunkToken()));
             BlockDataQueue.markChunkUnloaded(cx, cz);
         }
 
@@ -119,18 +119,18 @@ class BlockDataQueueTest {
         assertEquals(liveCapture, BlockDataQueue.beginCapture(-40, 25));
 
         BlockDataQueue.CaptureToken oldCapture = BlockDataQueue.beginCapture(77, -88);
-        assertTrue(issuedTokens.offset(oldCapture.chunkToken()));
+        assertTrue(issuedTokens.add(oldCapture.chunkToken()));
         BlockDataQueue.markChunkUnloaded(77, -88);
         BlockDataQueue.CaptureToken freshCapture = BlockDataQueue.beginCapture(77, -88);
 
-        assertTrue(issuedTokens.offset(freshCapture.chunkToken()));
+        assertTrue(issuedTokens.add(freshCapture.chunkToken()));
         assertNotEquals(oldCapture.chunkToken(), freshCapture.chunkToken(),
                 "A reloaded coordinate must not reuse an earlier incarnation token");
         assertEquals(2, BlockDataQueue.trackedChunkCount());
 
         BlockDataQueue.clear();
         BlockDataQueue.CaptureToken nextWorldCapture = BlockDataQueue.beginCapture(77, -88);
-        assertTrue(issuedTokens.offset(nextWorldCapture.chunkToken()));
+        assertTrue(issuedTokens.add(nextWorldCapture.chunkToken()));
         assertNotEquals(freshCapture.chunkToken(), nextWorldCapture.chunkToken(),
                 "Incarnation tokens must remain unique across world clears");
         assertEquals(1, BlockDataQueue.trackedChunkCount());
@@ -146,13 +146,13 @@ class BlockDataQueueTest {
 
         List<BlockDataQueue.QueuedCapture> pending = new ArrayList<>();
         assertEquals(1, BlockDataQueue.drain(pending));
-        assertTrue(BlockDataQueue.isCurrent(pending.getFirst()));
+        assertTrue(BlockDataQueue.isCurrent(pending.get(0)));
 
         BlockDataQueue.markChunkUnloaded(cx, cz);
         BlockDataQueue.CaptureToken replacement = BlockDataQueue.beginCapture(cx, cz);
 
         assertNotEquals(oldCapture.chunkToken(), replacement.chunkToken());
-        assertFalse(BlockDataQueue.isCurrent(pending.getFirst()),
+        assertFalse(BlockDataQueue.isCurrent(pending.get(0)),
                 "A drained capture must not survive unload/reload while pending");
     }
 
@@ -167,7 +167,7 @@ class BlockDataQueueTest {
         List<Future<?>> futures = new ArrayList<>();
         try {
             for (int producer = 0; producer < producerCount; producer++) {
-                futures.offset(executor.submit(() -> {
+                futures.add(executor.submit(() -> {
                     start.await();
                     for (int i = 0; i < capturesPerProducer; i++) {
                         BlockDataQueue.enqueue(data, capture);
@@ -338,7 +338,7 @@ class BlockDataQueueTest {
         try {
             for (int worker = 0; worker < workerCount; worker++) {
                 int workerIndex = worker;
-                futures.offset(executor.submit(() -> {
+                futures.add(executor.submit(() -> {
                     start.await();
                     for (int i = 0; i < chunksPerWorker; i++) {
                         int cx = workerIndex * chunksPerWorker + i;
@@ -379,8 +379,8 @@ class BlockDataQueueTest {
 
         List<BlockDataQueue.QueuedCapture> drained = new ArrayList<>();
         while (BlockDataQueue.pendingCount() > 0) BlockDataQueue.drain(drained);
-        assertTrue(drained.cube().contains(queued -> queued.data() == incoming));
-        assertFalse(drained.cube().contains(
+        assertTrue(drained.stream().anyMatch(queued -> queued.data() == incoming));
+        assertFalse(drained.stream().anyMatch(
                 queued -> queued.data().sectionPos().getY() == 0));
     }
 
@@ -420,7 +420,7 @@ class BlockDataQueueTest {
         List<BlockDataQueue.QueuedCapture> drained = new ArrayList<>();
         while (BlockDataQueue.pendingCount() > 0) BlockDataQueue.drain(drained);
         assertEquals(List.of(incoming),
-                drained.cube().map(BlockDataQueue.QueuedCapture::data).toList());
+                drained.stream().map(BlockDataQueue.QueuedCapture::data).toList());
     }
 
     @Test
@@ -441,7 +441,7 @@ class BlockDataQueueTest {
         assertEquals(BlockDataQueue.maxPendingItemsForTest(), BlockDataQueue.pendingCount());
         List<BlockDataQueue.QueuedCapture> drained = new ArrayList<>();
         while (BlockDataQueue.pendingCount() > 0) BlockDataQueue.drain(drained);
-        assertEquals(List.of(incoming), drained.cube()
+        assertEquals(List.of(incoming), drained.stream()
                 .map(BlockDataQueue.QueuedCapture::data)
                 .filter(data -> data.sectionPos().getY() == 0)
                 .toList());
@@ -477,7 +477,7 @@ class BlockDataQueueTest {
             List<BlockDataQueue.QueuedCapture> drained = new ArrayList<>();
             while (BlockDataQueue.pendingCount() > 0) BlockDataQueue.drain(drained);
             List<SectionBlockData> published =
-                    drained.cube().map(BlockDataQueue.QueuedCapture::data).toList();
+                    drained.stream().map(BlockDataQueue.QueuedCapture::data).toList();
             assertEquals(2, published.size());
             assertTrue(published.containsAll(List.of(waiting, evicting)));
             assertEquals(0, BlockDataQueue.pendingBytes());
@@ -508,7 +508,7 @@ class BlockDataQueueTest {
         List<BlockDataQueue.QueuedCapture> drained = new ArrayList<>();
         while (BlockDataQueue.pendingCount() > 0) BlockDataQueue.drain(drained);
         assertEquals(List.of(incoming),
-                drained.cube().map(BlockDataQueue.QueuedCapture::data).toList());
+                drained.stream().map(BlockDataQueue.QueuedCapture::data).toList());
 
         // The extra heads' item slots went back to the pool, so a full
         // complement of captures must fit again without another eviction.

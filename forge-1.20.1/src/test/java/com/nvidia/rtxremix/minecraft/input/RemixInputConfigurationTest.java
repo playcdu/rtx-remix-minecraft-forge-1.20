@@ -37,13 +37,13 @@ class RemixInputConfigurationTest {
     void runtimeSplashMessageIsDisabled() throws Exception {
         String value = readConfig().get("rtx.hideSplashMessage");
         assertNotNull(value);
-        assertTrue(Set.of("true", "1").contains(value.stripFormatting().lowercaseVariant(Locale.ROOT)));
+        assertTrue(Set.of("true", "1").contains(value.strip().toLowerCase(Locale.ROOT)));
     }
 
     private static Map<String, String> readConfig() throws Exception {
         Map<String, String> config = new HashMap<>();
         for (String rawLine : Files.readAllLines(Path.of("packaging", "rtx.conf"))) {
-            String line = rawLine.stripFormatting();
+            String line = rawLine.strip();
             if (line.isEmpty() || line.startsWith("#")) {
                 continue;
             }
@@ -51,8 +51,8 @@ class RemixInputConfigurationTest {
             if (delimiter < 0) {
                 continue;
             }
-            String option = line.substring(0, delimiter).stripFormatting();
-            String value = line.substring(delimiter + 1).stripFormatting();
+            String option = line.substring(0, delimiter).strip();
+            String value = line.substring(delimiter + 1).strip();
             assertNull(config.put(option, value), "Duplicate configuration option: " + option);
         }
         return config;
@@ -61,7 +61,7 @@ class RemixInputConfigurationTest {
     private static Set<String> canonicalChord(String binding) {
         Set<String> chord = new HashSet<>();
         for (String rawToken : binding.split(",")) {
-            String token = rawToken.stripFormatting().toUpperCase(Locale.ROOT);
+            String token = rawToken.strip().toUpperCase(Locale.ROOT);
             assertFalse(token.isEmpty(), "Empty key in runtime menu binding");
             String canonical = switch (token) {
                 case "CTRL", "CONTROL" -> "CTRL";

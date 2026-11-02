@@ -114,9 +114,9 @@ class TerrainStateTest {
                 terrain.createSnapshot(terrain.findColumn(-2, 5));
 
         assertEquals(List.of(-16, 48, 112),
-                snapshots.betweenClosedStream().map(TerrainState.SectionSnapshot::yOff).toList());
+                snapshots.stream().map(TerrainState.SectionSnapshot::yOff).toList());
         assertEquals(List.of("low", "middle", "high"),
-                snapshots.betweenClosedStream().map(TerrainState.SectionSnapshot::data).toList());
+                snapshots.stream().map(TerrainState.SectionSnapshot::data).toList());
         for (TerrainState.SectionSnapshot snapshot : snapshots) {
             assertEquals(-32, snapshot.xOff());
             assertEquals(80, snapshot.zOff());
@@ -530,7 +530,7 @@ class TerrainStateTest {
     }
 
     private static BlockLightKey lightKey(String path) {
-        return new BlockLightKey(BlockPos.ORIGIN, new ResourceLocation("test", path), 0);
+        return new BlockLightKey(BlockPos.ZERO, new ResourceLocation("test", path), 0);
     }
 
     private static void addSection(TerrainState terrain, int cx, int sy, int cz,

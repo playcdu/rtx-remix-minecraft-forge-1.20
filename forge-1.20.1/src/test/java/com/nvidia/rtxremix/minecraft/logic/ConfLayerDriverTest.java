@@ -456,9 +456,9 @@ class ConfLayerDriverTest {
     void biomeFilesAreRediscoveredOnReload(@TempDir Path gameDir) throws IOException {
         Path biomeDir = gameDir.resolve("rtx-remix").resolve("mods")
                 .resolve("minecraft-logic").resolve("confs").resolve("biomes");
-        Files.createDirectoriesSafe(biomeDir);
+        Files.createDirectories(biomeDir);
         Path plains = biomeDir.resolve("plains.conf");
-        Files.writeUtf(plains, "# plains test profile\n");
+        Files.writeString(plains, "# plains test profile\n");
 
         FakeConfigLayerApi api = new FakeConfigLayerApi();
         ConfLayerDriver driver = new ConfLayerDriver();
@@ -468,7 +468,7 @@ class ConfLayerDriverTest {
         assertFalse(firstStatus.containsKey(LogicChannels.BIOME_PREFIX + "swamp"));
 
         Files.delete(plains);
-        Files.writeUtf(biomeDir.resolve("swamp.conf"), "# swamp test profile\n");
+        Files.writeString(biomeDir.resolve("swamp.conf"), "# swamp test profile\n");
         assertTrue(driver.reload());
 
         Map<String, ConfLayerDriver.LayerStatus> reloadedStatus = statusesByName(driver);
@@ -513,13 +513,13 @@ class ConfLayerDriverTest {
             throws IOException {
         Path modZones = gameDir.resolve("rtx-remix").resolve("mods").resolve("minecraft-logic")
                 .resolve("confs").resolve("zones");
-        Files.createDirectoriesSafe(modZones);
-        Files.writeUtf(modZones.resolve("cave.conf"), "# shared archetype\n");
+        Files.createDirectories(modZones);
+        Files.writeString(modZones.resolve("cave.conf"), "# shared archetype\n");
 
         Path worldZones = worldDir.resolve("rtx-remix").resolve("confs").resolve("zones");
-        Files.createDirectoriesSafe(worldZones);
-        Files.writeUtf(worldZones.resolve("cave.conf"), "# this map's take on cave\n");
-        Files.writeUtf(worldZones.resolve("ruins.conf"), "# map-only profile\n");
+        Files.createDirectories(worldZones);
+        Files.writeString(worldZones.resolve("cave.conf"), "# this map's take on cave\n");
+        Files.writeString(worldZones.resolve("ruins.conf"), "# map-only profile\n");
 
         FakeConfigLayerApi api = new FakeConfigLayerApi();
         ConfLayerDriver driver = new ConfLayerDriver();
@@ -550,11 +550,11 @@ class ConfLayerDriverTest {
             throws IOException {
         Path modZones = gameDir.resolve("rtx-remix").resolve("mods").resolve("minecraft-logic")
                 .resolve("confs").resolve("zones");
-        Files.createDirectoriesSafe(modZones);
-        Files.writeUtf(modZones.resolve("cave.conf"), "# shared archetype\n");
+        Files.createDirectories(modZones);
+        Files.writeString(modZones.resolve("cave.conf"), "# shared archetype\n");
         Path worldZones = worldDir.resolve("rtx-remix").resolve("confs").resolve("zones");
-        Files.createDirectoriesSafe(worldZones);
-        Files.writeUtf(worldZones.resolve("ruins.conf"), "# map-only profile\n");
+        Files.createDirectories(worldZones);
+        Files.writeString(worldZones.resolve("ruins.conf"), "# map-only profile\n");
 
         FakeConfigLayerApi api = new FakeConfigLayerApi();
         ConfLayerDriver driver = new ConfLayerDriver();
@@ -579,11 +579,11 @@ class ConfLayerDriverTest {
     void joiningAWorldWithoutProfilesDropsThePreviousWorlds(@TempDir Path gameDir,
                                                             @TempDir Path firstWorld,
                                                             @TempDir Path plainWorld) throws IOException {
-        Files.createDirectoriesSafe(gameDir.resolve("rtx-remix").resolve("mods").resolve("minecraft-logic")
+        Files.createDirectories(gameDir.resolve("rtx-remix").resolve("mods").resolve("minecraft-logic")
                 .resolve("confs").resolve("zones"));
         Path firstZones = firstWorld.resolve("rtx-remix").resolve("confs").resolve("zones");
-        Files.createDirectoriesSafe(firstZones);
-        Files.writeUtf(firstZones.resolve("ruins.conf"), "# first map\n");
+        Files.createDirectories(firstZones);
+        Files.writeString(firstZones.resolve("ruins.conf"), "# first map\n");
 
         FakeConfigLayerApi api = new FakeConfigLayerApi();
         ConfLayerDriver driver = new ConfLayerDriver();
@@ -601,11 +601,11 @@ class ConfLayerDriverTest {
 
     @Test
     void reloadReacquiresBothRoots(@TempDir Path gameDir, @TempDir Path worldDir) throws IOException {
-        Files.createDirectoriesSafe(gameDir.resolve("rtx-remix").resolve("mods").resolve("minecraft-logic")
+        Files.createDirectories(gameDir.resolve("rtx-remix").resolve("mods").resolve("minecraft-logic")
                 .resolve("confs").resolve("zones"));
         Path worldZones = worldDir.resolve("rtx-remix").resolve("confs").resolve("zones");
-        Files.createDirectoriesSafe(worldZones);
-        Files.writeUtf(worldZones.resolve("ruins.conf"), "# map-only profile\n");
+        Files.createDirectories(worldZones);
+        Files.writeString(worldZones.resolve("ruins.conf"), "# map-only profile\n");
 
         FakeConfigLayerApi api = new FakeConfigLayerApi();
         ConfLayerDriver driver = new ConfLayerDriver();
@@ -613,8 +613,8 @@ class ConfLayerDriverTest {
         driver.onWorldJoin(worldDir);
 
         // An author edits the map's conf and adds another, then reloads in-game.
-        Files.writeUtf(worldZones.resolve("ruins.conf"), "# retuned\n");
-        Files.writeUtf(worldZones.resolve("crypt.conf"), "# new map profile\n");
+        Files.writeString(worldZones.resolve("ruins.conf"), "# retuned\n");
+        Files.writeString(worldZones.resolve("crypt.conf"), "# new map profile\n");
         assertTrue(driver.reload());
 
         Map<String, ConfLayerDriver.LayerStatus> reloaded = statusesByName(driver);
@@ -691,7 +691,7 @@ class ConfLayerDriverTest {
         }
 
         boolean wasReleased(String suffix) {
-            return releasedPaths.stream().contains(path -> path.endsWith(suffix));
+            return releasedPaths.stream().anyMatch(path -> path.endsWith(suffix));
         }
     }
 

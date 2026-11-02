@@ -358,7 +358,7 @@ class ChunkManagerMeshInstallTest {
     private static Class<?> nested(String simpleName) {
         return Arrays.stream(ChunkManager.class.getDeclaredClasses())
                 .filter(type -> type.getSimpleName().equals(simpleName))
-                .findClosest()
+                .findFirst()
                 .orElseThrow();
     }
 

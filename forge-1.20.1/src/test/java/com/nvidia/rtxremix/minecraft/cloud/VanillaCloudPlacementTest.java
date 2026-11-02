@@ -22,7 +22,7 @@ class VanillaCloudPlacementTest {
                         && placement.textureZ() == 0
                         && placement.x() <= 0.0
                         && placement.x() > -VanillaCloudPlacement.WORLD_PERIOD)
-                .findClosest()
+                .findFirst()
                 .orElseThrow();
 
         assertEquals(-0.3, origin.x(), 1.0e-9);
@@ -42,14 +42,14 @@ class VanillaCloudPlacementTest {
         VanillaCloudPlacement.Placement repeated = placements.stream()
                 .filter(placement -> Math.abs(placement.x() - cameraX) < 1.0e-9
                         && placement.textureZ() == 0)
-                .findClosest()
+                .findFirst()
                 .orElseThrow();
         VanillaCloudPlacement.Placement origin = placements(0.0, 0.0, worldTime).stream()
                 .filter(placement -> placement.textureX() == 0
                         && placement.textureZ() == 0
                         && placement.x() <= 0.0
                         && placement.x() > -VanillaCloudPlacement.WORLD_PERIOD)
-                .findClosest()
+                .findFirst()
                 .orElseThrow();
 
         assertEquals(0, repeated.textureX());
@@ -75,14 +75,14 @@ class VanillaCloudPlacementTest {
                 .filter(placement -> placement.textureX() == 0
                         && placement.textureZ() == 0
                         && placement.x() == 0.0)
-                .findClosest()
+                .findFirst()
                 .orElseThrow();
         VanillaCloudPlacement.Placement repeated =
                 placements(VanillaCloudPlacement.WORLD_PERIOD, 0.0, 0.0, 2048, 2048)
                         .stream()
                         .filter(placement -> placement.textureKey() == origin.textureKey()
                                 && placement.x() == VanillaCloudPlacement.WORLD_PERIOD)
-                        .findClosest()
+                        .findFirst()
                         .orElseThrow();
         assertEquals(
                 VanillaCloudPlacement.WORLD_PERIOD,

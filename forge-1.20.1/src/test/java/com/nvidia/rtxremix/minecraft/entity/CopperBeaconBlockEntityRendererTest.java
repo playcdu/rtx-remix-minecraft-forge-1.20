@@ -282,7 +282,7 @@ class CopperBeaconBlockEntityRendererTest {
         Map<Direction, Direction> directions = new EnumMap<>(Direction.class);
         for (Direction mount : Direction.values()) {
             JsonObject variant = variants
-                    .getAsJsonObject("mount=" + mount.name().lowercaseVariant(Locale.ROOT));
+                    .getAsJsonObject("mount=" + mount.name().toLowerCase(Locale.ROOT));
             assertNotNull(variant, "Missing base model variant for mount=" + mount);
             int x = variant.has("x") ? variant.get("x").getAsInt() : 0;
             int y = variant.has("y") ? variant.get("y").getAsInt() : 0;

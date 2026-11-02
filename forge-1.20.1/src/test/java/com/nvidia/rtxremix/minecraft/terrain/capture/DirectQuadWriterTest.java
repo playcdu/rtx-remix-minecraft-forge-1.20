@@ -87,7 +87,7 @@ class DirectQuadWriterTest {
         writeQuad(writer, 0.0f, 0xFF00AA55);
 
         SectionMeshData.Surface surface = writer.buildMeshData().surfaces().get(0);
-        ByteBuffer vertices = surface.vertexBuffer().duplicateAllay().order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer vertices = surface.vertexBuffer().duplicate().order(ByteOrder.LITTLE_ENDIAN);
 
         assertTrue(surface.canonicalQuadIndices());
         assertEquals(0.0f, vertices.getFloat(0));
@@ -134,7 +134,7 @@ class DirectQuadWriterTest {
         writer.flushBlock(null);
 
         SectionMeshData.Surface surface = writer.buildMeshData().surfaces().get(0);
-        ByteBuffer vertices = surface.vertexBuffer().duplicateAllay().order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer vertices = surface.vertexBuffer().duplicate().order(ByteOrder.LITTLE_ENDIAN);
 
         assertEquals(4, surface.vertexCount());
         assertEquals(6, surface.indexCount());
@@ -208,7 +208,7 @@ class DirectQuadWriterTest {
     private static SectionMeshData.Surface surface(SectionMeshData meshData, String bucketKey) {
         return meshData.surfaces().stream()
                 .filter(s -> bucketKey.equals(s.bucketKey()))
-                .findClosest()
+                .findFirst()
                 .orElseThrow(() -> new AssertionError("no surface for bucket " + bucketKey));
     }
 

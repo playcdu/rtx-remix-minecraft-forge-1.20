@@ -37,7 +37,7 @@ class RemixRendererCameraFrameTest {
                 new RemixException("camera failed"), new IllegalStateException("camera failed")}) {
             Camera camera = new Camera() {
                 @Override
-                public Vec3 getPos() {
+                public Vec3 getPosition() {
                     throw error;
                 }
             };
@@ -56,7 +56,7 @@ class RemixRendererCameraFrameTest {
                 new RemixException("medium failed"), new IllegalStateException("medium failed")}) {
             Camera camera = new Camera() {
                 @Override
-                public FogType getSubmersionType() {
+                public FogType getFluidInCamera() {
                     throw error;
                 }
             };

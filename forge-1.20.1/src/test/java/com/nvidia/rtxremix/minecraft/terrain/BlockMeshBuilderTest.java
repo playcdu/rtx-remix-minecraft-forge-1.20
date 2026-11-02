@@ -261,12 +261,12 @@ class BlockMeshBuilderTest {
     private static ByteBuffer surfaceBuffer(RemixMeshSurface surface, String name) throws Exception {
         Field field = RemixMeshSurface.class.getDeclaredField(name);
         field.setAccessible(true);
-        return ((ByteBuffer) field.get(surface)).duplicateAllay().order(ByteOrder.LITTLE_ENDIAN);
+        return ((ByteBuffer) field.get(surface)).duplicate().order(ByteOrder.LITTLE_ENDIAN);
     }
 
     private static int[] readInts(ByteBuffer buffer, int count) {
         int[] values = new int[count];
-        ByteBuffer src = buffer.duplicateAllay().order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer src = buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
         for (int i = 0; i < count; i++) {
             values[i] = src.getInt(i * 4);
         }

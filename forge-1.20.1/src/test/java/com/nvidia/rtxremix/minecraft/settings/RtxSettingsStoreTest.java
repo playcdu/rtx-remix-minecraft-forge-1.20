@@ -95,7 +95,7 @@ class RtxSettingsStoreTest {
     @Test
     void saveDeletesFileWhenNoOverridesRemain(@TempDir Path dir) throws Exception {
         Path file = dir.resolve("rtxremix.json");
-        Files.writeUtf(file, "stale");
+        Files.writeString(file, "stale");
         double[] f = {1.0}; int[] i = {0}; boolean[] b = {true};
 
         new RtxSettingsStore(file).save(registryWith(f, i, b));
@@ -106,7 +106,7 @@ class RtxSettingsStoreTest {
     @Test
     void loadSkipsUnknownIdsAndOutOfRange(@TempDir Path dir) throws Exception {
         Path file = dir.resolve("rtxremix.json");
-        Files.writeUtf(file,
+        Files.writeString(file,
                 "{\"version\":2,\"settings\":{\"i\":9999,\"ghost\":5,\"f\":2.0}}");
         double[] f = {0}; int[] i = {7}; boolean[] b = {true};
         new RtxSettingsStore(file).load(registryWith(f, i, b));
@@ -118,7 +118,7 @@ class RtxSettingsStoreTest {
     @Test
     void loadSkipsDefaultValuedEntries(@TempDir Path dir) throws Exception {
         Path file = dir.resolve("rtxremix.json");
-        Files.writeUtf(file,
+        Files.writeString(file,
                 "{\"version\":2,\"settings\":{\"f\":1.0,\"i\":0,\"b\":true}}");
         double[] f = {8.0}; int[] i = {9}; boolean[] b = {false};
 
@@ -132,7 +132,7 @@ class RtxSettingsStoreTest {
     @Test
     void loadTreatsDecimalJsonAsFloatBackedDefault(@TempDir Path dir) throws Exception {
         Path file = dir.resolve("rtxremix.json");
-        Files.writeUtf(file, "{\"version\":2,\"settings\":{\"post.exposure\":0.45}}");
+        Files.writeString(file, "{\"version\":2,\"settings\":{\"post.exposure\":0.45}}");
         int[] applies = {0};
         RtxSetting<Double> exposure = RtxSetting.ofFloat(
                 "post.exposure", SettingGroup.TONEMAPPING, "l", "t",
@@ -154,7 +154,7 @@ class RtxSettingsStoreTest {
     @Test
     void loadRejectsAnyVersionItDoesNotOwn(@TempDir Path dir) throws Exception {
         Path file = dir.resolve("rtxremix.json");
-        Files.writeUtf(file,
+        Files.writeString(file,
                 "{\"version\":3,\"settings\":{\"f\":9.0,\"i\":50,\"b\":false}}");
         double[] f = {1.0}; int[] i = {5}; boolean[] b = {true};
         new RtxSettingsStore(file).load(registryWith(f, i, b));

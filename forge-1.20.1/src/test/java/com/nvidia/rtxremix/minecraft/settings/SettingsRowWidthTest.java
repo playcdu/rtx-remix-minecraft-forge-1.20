@@ -73,7 +73,7 @@ class SettingsRowWidthTest {
      * {@link RtxSettingsFactory}. A row missing here fails the test rather than
      * going unmeasured.
      */
-    private static final Map<String, String> WIDEST_VALUE = Map.fromValues(
+    private static final Map<String, String> WIDEST_VALUE = Map.ofEntries(
             entry("rtxremix.setting.dist.autoFade", "OFF"),
             entry("rtxremix.setting.dist.light", "Auto"),
             entry("rtxremix.setting.dist.entity", "Auto"),

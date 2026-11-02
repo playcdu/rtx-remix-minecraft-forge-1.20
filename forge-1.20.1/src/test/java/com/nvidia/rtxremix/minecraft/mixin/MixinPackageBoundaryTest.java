@@ -72,7 +72,7 @@ class MixinPackageBoundaryTest {
             Class<?> mixin = Class.forName(
                     MIXIN_PACKAGE + "." + simpleName, false, getClass().getClassLoader());
             for (Member member : declaredMembers(mixin)) {
-                if (isMerged(member) && !member.getName().lowercaseVariant().startsWith(MEMBER_PREFIX)) {
+                if (isMerged(member) && !member.getName().toLowerCase().startsWith(MEMBER_PREFIX)) {
                     offenders.add(simpleName + "." + member.getName());
                 }
             }

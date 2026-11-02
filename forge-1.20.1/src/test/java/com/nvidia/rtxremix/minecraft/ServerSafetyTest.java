@@ -98,7 +98,7 @@ class ServerSafetyTest {
      */
     private static boolean referencesText(String className, String needle) {
         byte[] classBytes = readClassBytes(className);
-        return indexOf(classBytes, needle.asByteArray(StandardCharsets.UTF_8)) >= 0;
+        return indexOf(classBytes, needle.getBytes(StandardCharsets.UTF_8)) >= 0;
     }
 
     private static byte[] readClassBytes(String className) {

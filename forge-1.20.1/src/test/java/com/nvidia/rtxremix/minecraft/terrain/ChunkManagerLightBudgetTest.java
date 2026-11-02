@@ -61,7 +61,7 @@ class ChunkManagerLightBudgetTest {
             invoke(manager, "drainLightWork",
                     new Class<?>[]{long.class}, Long.MAX_VALUE);
 
-            assertEquals(32, Arrays.betweenClosedStream(lights).filter(RemixLight::isDeleted).count());
+            assertEquals(32, Arrays.stream(lights).filter(RemixLight::isDeleted).count());
             assertEquals(8L, longField(manager, "pendingLightOps"));
         } finally {
             manager.destroy();

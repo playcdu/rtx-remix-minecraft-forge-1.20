@@ -36,7 +36,7 @@ class CameraPathTest {
         assertEquals(30.0, interior.y(), EPSILON);
         assertEquals(45.0, interior.z(), EPSILON);
         assertEquals(60.0f, interior.yaw(), EPSILON);
-        assertEquals(7.5f, interior.xRot(), EPSILON);
+        assertEquals(7.5f, interior.pitch(), EPSILON);
         assertNull(interior.timeOfDay());
     }
 
@@ -95,14 +95,14 @@ class CameraPathTest {
             CameraPath.Sample sample = path.sampleAt(timeMs);
             assertTrue(Double.isFinite(sample.x()));
             assertTrue(Float.isFinite(sample.yaw()));
-            assertTrue(Float.isFinite(sample.xRot()));
+            assertTrue(Float.isFinite(sample.pitch()));
             assertTrue(sample.x() >= -EPSILON && sample.x() <= 20.0 + EPSILON);
             assertTrue(sample.yaw() >= -EPSILON && sample.yaw() <= 20.0f + EPSILON);
-            assertTrue(sample.xRot() >= -EPSILON && sample.xRot() <= 10.0f + EPSILON);
+            assertTrue(sample.pitch() >= -EPSILON && sample.pitch() <= 10.0f + EPSILON);
             if (timeMs >= 100 && timeMs <= 600) {
                 assertEquals(10.0, sample.x(), EPSILON);
                 assertEquals(10.0f, sample.yaw(), EPSILON);
-                assertEquals(5.0f, sample.xRot(), EPSILON);
+                assertEquals(5.0f, sample.pitch(), EPSILON);
             }
         }
     }

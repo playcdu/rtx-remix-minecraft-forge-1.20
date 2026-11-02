@@ -35,10 +35,10 @@ class SkyRendererDimensionSkyTest {
         int texelCount = AtmosphericSkyGenerator.WIDTH * AtmosphericSkyGenerator.HEIGHT;
         for (int texel = 0; texel < texelCount; texel++) {
             int base = texel * BYTES_PER_TEXEL;
-            assertEquals(0.25f, Float.float16ToFloat(pixels.getShort(base)));
-            assertEquals(0.5f, Float.float16ToFloat(pixels.getShort(base + 2)));
-            assertEquals(1.0f, Float.float16ToFloat(pixels.getShort(base + 4)));
-            assertEquals(1.0f, Float.float16ToFloat(pixels.getShort(base + 6)));
+            assertEquals(0.25f, float16ToFloat(pixels.getShort(base)));
+            assertEquals(0.5f, float16ToFloat(pixels.getShort(base + 2)));
+            assertEquals(1.0f, float16ToFloat(pixels.getShort(base + 4)));
+            assertEquals(1.0f, float16ToFloat(pixels.getShort(base + 6)));
         }
     }
 
@@ -87,6 +87,21 @@ class SkyRendererDimensionSkyTest {
         assertArrayEquals(
                 new float[]{0.0f, 0.0f, 0.0f},
                 SkyRenderer.fixedSkyRadiance(DimensionSpecialEffects.SkyType.NONE));
+    }
+
+    /** IEEE 754 binary16 decode; {@code Float.float16ToFloat} is Java 20, this module targets 17. */
+    private static float float16ToFloat(short bits) {
+        int sign = (bits & 0x8000) << 16;
+        int exponent = (bits >>> 10) & 0x1F;
+        int mantissa = bits & 0x3FF;
+        if (exponent == 0x1F) {
+            return Float.intBitsToFloat(sign | 0x7F800000 | (mantissa << 13));
+        }
+        if (exponent == 0) {
+            float magnitude = mantissa * 0x1p-24f;
+            return sign != 0 ? -magnitude : magnitude;
+        }
+        return Float.intBitsToFloat(sign | ((exponent + 112) << 23) | (mantissa << 13));
     }
 
     private static float luminance(float[] radiance) {
