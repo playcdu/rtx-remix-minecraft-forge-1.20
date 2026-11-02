@@ -25,7 +25,13 @@ import org.spongepowered.asm.mixin.Mixin;
  * identity one so the geometry stays block-local. When Remix declines, vanilla renders
  * as usual.
  *
- * <p>{@code renderEntity}, which held items reach through {@code BuiltinModelItemRenderer},
+ * <p>Embeddium replaces vanilla's block-entity loop with
+ * {@code SodiumWorldRenderer.renderBlockEntities}, which still dispatches every block entity
+ * through this {@code render}, so the wrap fires under Embeddium exactly as under vanilla.
+ * Entity Model Features and Entity Texture Features inject into the private
+ * {@code tryRender}/{@code setupAndRender} this calls, which the wrap leaves in place.
+ *
+ * <p>{@code renderItem}, which held items reach through {@code BlockEntityWithoutLevelRenderer},
  * is not wrapped: a block entity rendered inside an entity capture arrives through that
  * entity's provider and becomes that entity's parts.
  */
@@ -33,7 +39,7 @@ import org.spongepowered.asm.mixin.Mixin;
 public abstract class BlockEntityRenderDispatcherMixin {
 
     @WrapMethod(
-        method = "setupAndRender(Lnet/minecraft/world/level/block/entity/BlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;)V"
+        method = "render(Lnet/minecraft/world/level/block/entity/BlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;)V"
     )
     private <E extends BlockEntity> void rtxremix$captureBlockEntityInPlace(
             E be, float tickDelta, PoseStack matrices,
@@ -44,9 +50,9 @@ public abstract class BlockEntityRenderDispatcherMixin {
                 && be.hasLevel()
                 && renderer.renderBlockEntityInPlace(be,
                         (captureMatrices, captureProvider) ->
-                                original.handle(be, tickDelta, captureMatrices, captureProvider));
+                                original.call(be, tickDelta, captureMatrices, captureProvider));
         if (!captured) {
-            original.handle(be, tickDelta, matrices, provider);
+            original.call(be, tickDelta, matrices, provider);
         }
     }
 }

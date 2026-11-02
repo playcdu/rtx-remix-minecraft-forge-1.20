@@ -64,7 +64,7 @@ public final class CopperBeaconBlockEntity extends BlockEntity
     private static final DeferredRegister<BlockEntityType<?>> BLOCK_ENTITY_TYPES =
             DeferredRegister.create(ForgeRegistries.BLOCK_ENTITY_TYPES, RtxRemixCommonMod.MOD_ID);
 
-    @SuppressWarnings("DataFlowIssue") // 1.20.1's builder takes a null datafixer type
+    /** The block entity type; {@code build(null)}: no datafixer type, as for every modded type. */
     public static final RegistryObject<BlockEntityType<CopperBeaconBlockEntity>> TYPE =
             BLOCK_ENTITY_TYPES.register(CopperBeaconBlock.ID, () -> BlockEntityType.Builder.of(
                     CopperBeaconBlockEntity::new, CopperBeaconBlock.INSTANCE.get()).build(null));

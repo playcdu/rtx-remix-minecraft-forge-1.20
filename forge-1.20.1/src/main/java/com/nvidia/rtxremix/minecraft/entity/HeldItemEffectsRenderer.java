@@ -26,7 +26,9 @@ import net.minecraft.core.particles.ParticleType;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.particles.SimpleParticleType;
 import net.minecraft.core.registries.BuiltInRegistries;
+import com.mojang.blaze3d.systems.RenderSystem;
 import org.joml.Matrix4f;
+import org.joml.Quaternionf;
 import org.joml.Quaternionfc;
 import org.joml.Vector3f;
 import org.joml.Vector3fc;
@@ -43,25 +45,35 @@ import org.joml.Vector3fc;
  * layer the particle pipeline's own material, so a held flame and a placed
  * flame are lit by the same numbers.
  *
- * <p>Every capture space is world-aligned, the first-person hand included:
- * vanilla roots the hand stack at the inverse camera rotation and carries the
- * camera rotation in the model-view instead. The camera's rotation therefore
- * turns a quad toward the viewer in all of them, and world up is +Y in all of
- * them, which is the direction smoke rises.
+ * <p>Entity and block-entity capture spaces are world-aligned, so the camera's
+ * rotation turns a quad toward the viewer in them and world up is +Y, the
+ * direction smoke rises. The first-person hand is not: 1.20.1's
+ * {@code GameRenderer.renderItemInHand} resets the hand stack to identity, so the
+ * hand is drawn in view space under the model-view (1.21 rooted it at the inverse
+ * camera rotation and carried that rotation in the model-view instead). There the
+ * facing is the camera's world rotation carried into view space, which is the half
+ * turn about +Y of a camera looking down -Z, taken back through whatever the
+ * model-view holds; {@link #firstPersonFacing} computes it, so the first-person
+ * effects keep exactly the orientation they had on 1.21.
  *
  * <p>Render thread only: the scratch objects are shared across calls.
  */
 public final class HeldItemEffectsRenderer {
 
     private static final RenderType EFFECT_LAYER =
-            RenderType.entityTranslucentEmissive(TextureAtlas.PARTICLE_ATLAS_TEXTURE);
+            RenderType.entityTranslucentEmissive(TextureAtlas.LOCATION_PARTICLES);
     private static final float TICKS_PER_SECOND = 20.0f;
     private static final int OPAQUE = 255;
     private static final int WHITE = 255;
     private static final int SMOKE_ALPHA = Math.round(HeldItemSmoke.OPACITY * 255.0f);
     private static final int SMOKE_GREY = Math.round(ParticleTint.SOOT_GREY * 255.0f);
 
+    /** A camera-rotated quad's orientation in view space: a half turn about +Y. */
+    private static final Quaternionfc VIEW_SPACE_CAMERA_FACING = new Quaternionf().rotationY((float) Math.PI);
+
     private static final Matrix4f scratchPose = new Matrix4f();
+    private static final Matrix4f scratchModelView = new Matrix4f();
+    private static final Quaternionf scratchFacing = new Quaternionf();
     private static final Vector3f scratchAnchor = new Vector3f();
     private static final Vector3f scratchScale = new Vector3f();
     private static final HeldItemSmoke.Puff[] scratchPuffs = new HeldItemSmoke.Puff[HeldItemSmoke.SLOTS];
@@ -90,20 +102,22 @@ public final class HeldItemEffectsRenderer {
         SimpleParticleType flameParticle = HeldItemFlame.particleFor(stack);
         if (flameParticle == null) return;
         // Null outside a hand: an item_display posed with a hand transform reaches
-        // this hook with no HeldItemRenderer above it. Nothing in HeldLightState
+        // this hook with no ItemInHandRenderer above it. Nothing in HeldLightState
         // can put out a prop, so it burns.
         LivingEntity holder = context.getHeldItemHolder();
         if (holder != null && !HeldLightState.isLit(holder, stack)) return;
 
         Minecraft client = Minecraft.getInstance();
-        if (client.world == null) return;
+        if (client.level == null) return;
         SpriteSet flameSprites = spriteProvider(client, flameParticle);
         SpriteSet smokeSprites = spriteProvider(client, ParticleTypes.SMOKE);
         if (flameSprites == null || smokeSprites == null) return;
 
-        Quaternionfc facing = client.gameRenderer.getCamera().getRotation();
+        Quaternionfc facing = mode.firstPerson()
+                ? firstPersonFacing()
+                : client.gameRenderer.getMainCamera().rotation();
         Quaternionfc frame = HeldItemFlame.riseFrame(mode, facing);
-        double ticks = client.world.getTime() + client.getRenderTickCounter().getTickDelta(false);
+        double ticks = client.level.getGameTime() + client.getPartialTick();
         float phase = mode.ordinal();
         float cameraOffset = HeldItemFlame.cameraOffset(mode);
         // Null when the capture does not know where the eye is; the poses then stay at depth 1.
@@ -113,7 +127,7 @@ public final class HeldItemEffectsRenderer {
         // A hand draws its item scaled down (item/generated: 0.68 in first person,
         // 0.55 in third). The flame and smoke are world-sized, so the poses divide
         // that scale back out.
-        float displayScale = model.getTransforms().getTransforms(mode).scale.x;
+        float displayScale = model.getTransforms().getTransform(mode).scale.x();
         VertexConsumer buffer = consumers.getBuffer(EFFECT_LAYER);
 
         matrices.pushPose();
@@ -126,7 +140,7 @@ public final class HeldItemEffectsRenderer {
                 cameraOffset, eye, depthFraction, scratchAnchor, scratchScale, scratchPose);
         entry.pose().set(scratchPose);
         // A freshly spawned particle of the type shows the provider's first sprite.
-        emitQuad(buffer, entry, flameSprites.getSprite(0, 1), WHITE, OPAQUE);
+        emitQuad(buffer, entry, flameSprites.get(0, 1), WHITE, OPAQUE);
 
         // Every slot is emitted, dormant ones included, so part ordinals stay
         // fixed: the retained instance behind each quad keeps its identity.
@@ -136,17 +150,29 @@ public final class HeldItemEffectsRenderer {
                 HeldItemSmoke.composePose(itemPose, displayScale, facing, frame, puff, cameraOffset, eye,
                         depthFraction, scratchAnchor, scratchScale, scratchPose);
                 entry.pose().set(scratchPose);
-                emitQuad(buffer, entry, smokeSprites.getSprite(puff.age, puff.maxAge),
+                emitQuad(buffer, entry, smokeSprites.get(puff.age, puff.maxAge),
                         SMOKE_GREY, SMOKE_ALPHA);
             }
         }
         matrices.popPose();
     }
 
+    /**
+     * The first-person facing in the hand stack's space: the view-space orientation a
+     * camera-rotated quad has, a half turn about +Y, through the inverse of the current
+     * model-view (identity during vanilla's hand render, kept general like the
+     * first-person pass's own eye). Allocation-free; the result lives in scratch.
+     */
+    private static Quaternionfc firstPersonFacing() {
+        scratchModelView.set(RenderSystem.getModelViewMatrix()).invert()
+                .getNormalizedRotation(scratchFacing);
+        return scratchFacing.mul(VIEW_SPACE_CAMERA_FACING);
+    }
+
     private static SpriteSet spriteProvider(Minecraft client, ParticleType<?> particle) {
         Object provider = ((ParticleManagerAccessor) client.particleEngine)
                 .getSpriteAwareFactories()
-                .get(BuiltInRegistries.PARTICLE_TYPE.location(particle));
+                .get(BuiltInRegistries.PARTICLE_TYPE.getKey(particle));
         return provider instanceof SpriteSet spriteProvider ? spriteProvider : null;
     }
 
@@ -169,11 +195,12 @@ public final class HeldItemEffectsRenderer {
 
     private static void vertex(VertexConsumer buffer, PoseStack.Pose entry,
                                float x, float y, float u, float v, int grey, int alpha) {
-        buffer.vertex(entry, x, y, 0.0f)
+        buffer.vertex(entry.pose(), x, y, 0.0f)
                 .color(grey, grey, grey, alpha)
                 .uv(u, v)
-                .overlayCoords(OverlayTexture.DEFAULT_UV)
-                .light(LightTexture.MAX_LIGHT_COORDINATE)
-                .normal(entry, 0.0f, 0.0f, 1.0f);
+                .overlayCoords(OverlayTexture.NO_OVERLAY)
+                .uv2(LightTexture.FULL_BRIGHT)
+                .normal(entry.normal(), 0.0f, 0.0f, 1.0f)
+                .endVertex();
     }
 }

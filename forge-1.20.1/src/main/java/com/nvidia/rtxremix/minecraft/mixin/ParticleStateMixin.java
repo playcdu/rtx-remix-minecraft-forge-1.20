@@ -36,10 +36,10 @@ public abstract class ParticleStateMixin implements RemixParticleStateAccess {
     private int rtxremix$particleSlot = -1;
 
     @Redirect(
-        method = "setPower(DDD)V",
+        method = "move(DDD)V",
         at = @At(
             value = "INVOKE",
-            target = "Lnet/minecraft/world/entity/Entity;collideWithShapes(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/AABB;Lnet/minecraft/world/level/Level;Ljava/util/List;)Lnet/minecraft/world/phys/Vec3;"
+            target = "Lnet/minecraft/world/entity/Entity;collideBoundingBox(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/AABB;Lnet/minecraft/world/level/Level;Ljava/util/List;)Lnet/minecraft/world/phys/Vec3;"
         )
     )
     private Vec3 rtxremix$adjustMovementForParticleCollision(
@@ -55,7 +55,7 @@ public abstract class ParticleStateMixin implements RemixParticleStateAccess {
 
         ParticleTickProfiler.beginCollisionCheck();
         try {
-            return Entity.collideWithShapes(entity, movement, box, world, collisions);
+            return Entity.collideBoundingBox(entity, movement, box, world, collisions);
         } finally {
             ParticleTickProfiler.endCollisionCheck();
         }

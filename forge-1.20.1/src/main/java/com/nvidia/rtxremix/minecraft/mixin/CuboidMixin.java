@@ -27,8 +27,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * the cuboid's polygons, sprite, folded tint and pose are handed to the consumer, which
  * registers the pivot in the {@link EntityRenderContext} and records a rigid part
  * keyed by the cuboid's identity; the vanilla vertex write is cancelled.
+ *
+ * <p>Embeddium's fast path ({@code ModelPart.compile} HEAD, cancellable) only takes
+ * over when the consumer is a {@code VertexBufferWriter}; the capturing consumer is not
+ * one, so its cubes still reach this method. A mod cube class that overrides
+ * {@code compile} without calling it (Entity Model Features' custom cubes) falls back to
+ * the consumer's transformed bulk-vertex path instead.
+ *
+ * <p>Priority 1100 so this HEAD injection lands after other mods' default-priority HEAD
+ * argument rewrites (Shoulder Surfing fades the camera entity through the alpha
+ * argument) and the captured tint is the one vanilla would have drawn.
  */
-@Mixin(ModelPart.Cube.class)
+@Mixin(value = ModelPart.Cube.class, priority = 1100)
 public class CuboidMixin {
 
     @Shadow
@@ -37,9 +47,10 @@ public class CuboidMixin {
 
     @Inject(method = "compile", at = @At("HEAD"), cancellable = true)
     private void rtxremix$onRenderCuboid(PoseStack.Pose entry, VertexConsumer vertexConsumer,
-                                          int light, int overlay, int color,
+                                          int light, int overlay,
+                                          float red, float green, float blue, float alpha,
                                           CallbackInfo ci) {
-        // TextureAtlasSprite-atlas models (chests, beds, banners, shields, pots) draw through a
+        // Sprite-atlas models (chests, beds, banners, shields, pots) draw through a
         // wrapper whose only behaviour is remapping UVs into the sprite's rectangle.
         // The capture reproduces that remap when it rebuilds the cuboid, so the
         // wrapper is looked through and the sprite travels with the part: one cuboid
@@ -67,11 +78,25 @@ public class CuboidMixin {
         // would reuse another cuboid's geometry.
         // Folded before capture: the tint is an instance property downstream, so a
         // damage or priming flash is a per-instance update, never a new mesh.
+        // 1.20.1 passes the tint as four floats where 1.21 passed packed ARGB.
+        int color = rtxremix$channel(alpha) << 24
+                | rtxremix$channel(red) << 16
+                | rtxremix$channel(green) << 8
+                | rtxremix$channel(blue);
         consumer.acceptCuboid(this.polygons,
                 RemixCapturingConsumer.applyEntityOverlay(color, overlay),
                 entry.pose(),
                 sprite);
 
         ci.cancel();
+    }
+
+    /**
+     * One tint channel as a byte. Rounded rather than truncated, so a tint a renderer
+     * unpacked from ARGB as {@code c / 255f}, the copper beacon's lens or a dyed sheep's
+     * wool, packs back to the byte it came from.
+     */
+    private static int rtxremix$channel(float value) {
+        return Math.max(0, Math.min(255, (int) (value * 255.0F + 0.5F)));
     }
 }

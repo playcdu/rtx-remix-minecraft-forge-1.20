@@ -97,7 +97,7 @@ public final class RemixBlockEntityPass {
     public void capture(BlockEntity be, BlockEntityRenderCall call,
                         EntityRenderDispatcher dispatcher, RemixEntitySubmitter submitter) {
         long captureStart = System.nanoTime();
-        EntityRenderContext ctx = EntityRenderContext.getBlockEntity();
+        EntityRenderContext ctx = EntityRenderContext.get();
         boolean hadShadows = ((EntityRenderDispatcherAccessor) dispatcher).rtxremix$getRenderShadows();
         dispatcher.setRenderShadow(false);
         provider.beginEntity();
@@ -120,7 +120,7 @@ public final class RemixBlockEntityPass {
             ctx.reset();
         }
         frameCaptureNanos += System.nanoTime() - captureStart;
-        if (layers.clear()) {
+        if (layers.isEmpty()) {
             // The dispatcher's own render-distance check ends here too. Snapshotting
             // the zero bones it left would swap the reusable buffer for the shared
             // empty array and force the next capture to allocate.

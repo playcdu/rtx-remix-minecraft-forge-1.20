@@ -109,7 +109,11 @@ public final class HeldItemFlame {
                 || block.defaultBlockState().getLightEmission() <= 0) {
             return null;
         }
-        return ((TorchBlockAccessor) block).getParticle();
+        // 1.20.1 types the torch's particle as ParticleOptions; the torch family's
+        // flames are simple particle types, and anything else has no sprite flame.
+        return ((TorchBlockAccessor) block).getParticle() instanceof SimpleParticleType flame
+                ? flame
+                : null;
     }
 
     /** Whether an item render mode is a hand, in first or third person. */

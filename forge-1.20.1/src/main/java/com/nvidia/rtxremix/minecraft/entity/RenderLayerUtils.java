@@ -4,9 +4,11 @@
  */
 package com.nvidia.rtxremix.minecraft.entity;
 
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.nvidia.rtxremix.minecraft.mixin.EntityCompositeRenderTypeAccessor;
+import com.nvidia.rtxremix.minecraft.mixin.EntityTextureStateShardAccessor;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.RenderStateShard;
-import com.mojang.blaze3d.vertex.VertexFormatElement;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.Collections;
@@ -20,8 +22,10 @@ import java.util.WeakHashMap;
  * <p>A renderer requests its {@code VertexConsumer} by layer,
  * {@code provider.getBuffer(RenderType.entityCutout(textureId))}, so the
  * layer is where geometry and material meet and the one place material
- * identity is read. Its {@link RenderStateShard} state, reached through the access
- * widener, gives the texture the layer is submitted under, if any, the
+ * identity is read. Its {@link RenderStateShard} state, reached through
+ * {@link EntityCompositeRenderTypeAccessor} (the composite class is package-private in
+ * 1.20.1) and the access transformer, gives the texture the layer is submitted under,
+ * if any, the
  * {@link SurfaceMode} Remix shades with, and whether the geometry is streamed
  * afresh every frame; its draw mode gives the {@link Topology} and whether an
  * untextured layer carries geometry worth submitting at all.
@@ -55,7 +59,7 @@ final class RenderLayerUtils {
      * pools by one, so they share this.
      */
     static final ResourceLocation UNTEXTURED_LAYER_ID =
-            ResourceLocation.create("rtxremix", "untextured_entity_layer");
+            new ResourceLocation("rtxremix", "untextured_entity_layer");
 
     private RenderLayerUtils() {}
 
@@ -89,20 +93,20 @@ final class RenderLayerUtils {
     }
 
     private static Optional<ResourceLocation> capturableTextureUncached(RenderType layer) {
-        if (layer instanceof RenderType.CompositeRenderType multiPhase
-                && multiPhase.state().depthTestState == RenderStateShard.ALWAYS_DEPTH_TEST) {
+        if (layer instanceof EntityCompositeRenderTypeAccessor multiPhase
+                && multiPhase.rtxremix$getState().depthTestState == RenderStateShard.NO_DEPTH_TEST) {
             return Optional.empty();
         }
         return extractTexture(layer);
     }
 
     private static Optional<ResourceLocation> extractTexture(RenderType layer) {
-        if (layer instanceof RenderType.CompositeRenderType multiPhase) {
-            RenderType.CompositeState phases = multiPhase.state();
-            RenderStateShard.EmptyTextureStateShard textureBase = phases.texture;
+        if (layer instanceof EntityCompositeRenderTypeAccessor multiPhase) {
+            RenderType.CompositeState phases = multiPhase.rtxremix$getState();
+            RenderStateShard.EmptyTextureStateShard textureBase = phases.textureState;
 
             if (textureBase instanceof RenderStateShard.TextureStateShard texture) {
-                return texture.cutoutTexture();
+                return ((EntityTextureStateShardAccessor) texture).rtxremix$getTexture();
             }
         }
         return Optional.empty();
@@ -114,16 +118,16 @@ final class RenderLayerUtils {
      */
     static Optional<Topology> topology(RenderType layer) {
         return switch (layer.mode()) {
-            case QUADS -> Optional.create(Topology.QUADS);
-            case TRIANGLE_STRIP -> Optional.create(Topology.TRIANGLE_STRIP);
+            case QUADS -> Optional.of(Topology.QUADS);
+            case TRIANGLE_STRIP -> Optional.of(Topology.TRIANGLE_STRIP);
             default -> Optional.empty();
         };
     }
 
     /**
      * Whether a layer that draws without a texture still carries geometry worth
-     * submitting to Remix. In 1.21.1 the lead between a mob and its holder is the
-     * only such layer.
+     * submitting to Remix. In 1.20.1, as in 1.21.1, the lead between a mob and its
+     * holder is the only such layer.
      *
      * <p>Two conditions, both about what the layer can actually shade with.
      * Vertex colour is the only surface detail such a layer has, so a layer
@@ -138,7 +142,7 @@ final class RenderLayerUtils {
         // capturableTexture declined must not re-enter capture through here.
         return extractTexture(layer).isEmpty()
                 && topology(layer).filter(t -> t == Topology.TRIANGLE_STRIP).isPresent()
-                && layer.format().getElements().contains(VertexFormatElement.COLOR);
+                && layer.format().getElements().contains(DefaultVertexFormat.ELEMENT_COLOR);
     }
 
     /**
@@ -156,8 +160,8 @@ final class RenderLayerUtils {
     }
 
     private static boolean isStreamedPerFrameUncached(RenderType layer) {
-        boolean beaconBeamProgram = layer instanceof RenderType.CompositeRenderType multiPhase
-                && multiPhase.state().program == RenderStateShard.BEACON_BEAM_PROGRAM;
+        boolean beaconBeamProgram = layer instanceof EntityCompositeRenderTypeAccessor multiPhase
+                && multiPhase.rtxremix$getState().shaderState == RenderStateShard.RENDERTYPE_BEACON_BEAM_SHADER;
         return classifyStreamedPerFrame(topology(layer).orElse(Topology.QUADS), beaconBeamProgram);
     }
 
@@ -176,20 +180,21 @@ final class RenderLayerUtils {
      * behaviour and it is classified as translucent.
      */
     static SurfaceMode surfaceMode(RenderType layer) {
-        if (!(layer instanceof RenderType.CompositeRenderType multiPhase)) {
+        if (!(layer instanceof EntityCompositeRenderTypeAccessor multiPhase)) {
             return SurfaceMode.CUTOUT;
         }
 
-        RenderType.CompositeState phases = multiPhase.state();
+        RenderType.CompositeState phases = multiPhase.rtxremix$getState();
+        RenderStateShard.ShaderStateShard program = phases.shaderState;
         return classifySurfaceMode(
-                phases.program == RenderStateShard.EYES_PROGRAM
-                        || phases.program == RenderStateShard.ENTITY_TRANSLUCENT_EMISSIVE_PROGRAM,
+                program == RenderStateShard.RENDERTYPE_EYES_SHADER
+                        || program == RenderStateShard.RENDERTYPE_ENTITY_TRANSLUCENT_EMISSIVE_SHADER,
                 phases.transparencyState == RenderStateShard.ADDITIVE_TRANSPARENCY,
                 phases.transparencyState == RenderStateShard.TRANSLUCENT_TRANSPARENCY
                         || phases.transparencyState == RenderStateShard.CRUMBLING_TRANSPARENCY,
-                phases.program == RenderStateShard.ENTITY_SOLID_PROGRAM,
-                phases.program == RenderStateShard.TEXT_PROGRAM
-                        || phases.program == RenderStateShard.TEXT_INTENSITY_PROGRAM);
+                program == RenderStateShard.RENDERTYPE_ENTITY_SOLID_SHADER,
+                program == RenderStateShard.RENDERTYPE_TEXT_SHADER
+                        || program == RenderStateShard.RENDERTYPE_TEXT_INTENSITY_SHADER);
     }
 
     /**

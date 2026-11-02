@@ -39,10 +39,13 @@ jarJar.enable()
 
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
-    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 
-    // MixinExtras is nested with jar-in-jar; Forge 47 does not ship it.
+    // MixinExtras is nested with jar-in-jar; Forge 47 does not ship it. Its
+    // processor must precede Mixin's: javac runs processors in classpath order,
+    // and Mixin's writes no refmap entries for injector types not yet registered,
+    // so every @WrapOperation would miss its SRG target at runtime.
     compileOnly(annotationProcessor("io.github.llamalad7:mixinextras-common:${mixinextras_version}"))
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
     implementation(jarJar("io.github.llamalad7:mixinextras-forge:${mixinextras_version}")) {
         jarJar.ranged(it, "[${mixinextras_version},)")
     }

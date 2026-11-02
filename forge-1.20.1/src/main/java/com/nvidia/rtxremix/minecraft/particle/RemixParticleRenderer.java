@@ -28,8 +28,11 @@ import net.minecraft.client.particle.SingleQuadParticle;
 import net.minecraft.client.particle.Particle;
 import net.minecraft.client.particle.ParticleRenderType;
 import net.minecraft.client.particle.TextureSheetParticle;
+import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
+import org.joml.Quaternionf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -125,7 +128,7 @@ public class RemixParticleRenderer {
         }
 
         BlockTextureManager blockTexMgr = renderer.getTextureManager();
-        var camRot = client.gameRenderer.getCamera().getRotation();
+        Quaternionf camRot = client.gameRenderer.getMainCamera().rotation();
         float qx = camRot.x, qy = camRot.y, qz = camRot.z, qw = camRot.w;
         ParticleBillboardBasis billboardBasis = ParticleBillboardBasis.fromCamera(qx, qy, qz, qw);
 
@@ -137,16 +140,19 @@ public class RemixParticleRenderer {
                 continue;
             }
 
-            boolean isTerrain = sheet == ParticleRenderType.TERRAIN_SHEET;
-            RemixMaterial material = resolveMaterial(sheet, blockTexMgr);
-            if (material == null || !material.isAlive()) continue;
-
-            int categoryFlags = isTerrain ? 0 : InstanceCategoryBit.PARTICLE;
-            int blendKind = isTerrain ? BLEND_TERRAIN : BLEND_PARTICLE;
-            DynamicBucket bucket = getOrCreateBucket(
-                    new BucketKey(material.getHandle(), categoryFlags, blendKind),
-                    material, categoryFlags, blendKind);
-            if (bucket == null) continue;
+            // A vanilla sheet binds one known atlas. A sheet another mod registered with
+            // Forge binds whatever texture its begin() chooses, so only particles whose
+            // sprite names its atlas can be captured from it: see resolveModdedBucket.
+            boolean vanillaSheet = isVanillaSheet(sheet);
+            DynamicBucket sheetBucket = null;
+            if (vanillaSheet) {
+                sheetBucket = resolveSheetBucket(sheet, blockTexMgr);
+                if (sheetBucket == null) continue;
+            }
+            DynamicBucket moddedParticleBucket = null;
+            DynamicBucket moddedBlockBucket = null;
+            boolean moddedParticleResolved = false;
+            boolean moddedBlockResolved = false;
 
             for (Particle particle : queue) {
                 if (!(particle instanceof SingleQuadParticle)) continue;
@@ -155,10 +161,11 @@ public class RemixParticleRenderer {
                 if (pa.getDead()) continue;
 
                 BillboardParticleAccessor billboard = (BillboardParticleAccessor) particle;
+                TextureAtlasSprite sprite = null;
                 int boundsMin = 0;
                 int boundsMax = 0;
                 if (particle instanceof TextureSheetParticle) {
-                    TextureAtlasSprite sprite = ((SpriteBillboardParticleAccessor) particle).getSprite();
+                    sprite = ((SpriteBillboardParticleAccessor) particle).getSprite();
                     if (sprite == null) continue;
                     float spriteMinU = sprite.getU0();
                     float spriteMinV = sprite.getV0();
@@ -170,6 +177,27 @@ public class RemixParticleRenderer {
                     boundsMax = HardcodedVertex.packHalf2x16(
                             Math.max(spriteMinU, spriteMaxU),
                             Math.max(spriteMinV, spriteMaxV));
+                }
+
+                DynamicBucket bucket = sheetBucket;
+                if (!vanillaSheet) {
+                    if (sprite == null) continue;
+                    ResourceLocation atlas = sprite.atlasLocation();
+                    if (TextureAtlas.LOCATION_PARTICLES.equals(atlas)) {
+                        if (!moddedParticleResolved) {
+                            moddedParticleBucket = resolveModdedBucket(atlasManager.getMaterial());
+                            moddedParticleResolved = true;
+                        }
+                        bucket = moddedParticleBucket;
+                    } else if (TextureAtlas.LOCATION_BLOCKS.equals(atlas)) {
+                        if (!moddedBlockResolved) {
+                            moddedBlockBucket = resolveModdedBucket(blockTexMgr != null
+                                    ? blockTexMgr.getAtlasMaterial(BlockTextureManager.L_CUTOUT) : null);
+                            moddedBlockResolved = true;
+                        }
+                        bucket = moddedBlockBucket;
+                    }
+                    if (bucket == null) continue;
                 }
 
                 float u0 = billboard.invokeGetMinU();
@@ -300,6 +328,38 @@ public class RemixParticleRenderer {
         removedSlotsThisFrame = 0;
         capacityGrowsThisFrame = 0;
         meshUpdatesThisFrame = 0;
+    }
+
+    private static boolean isVanillaSheet(ParticleRenderType sheet) {
+        return sheet == ParticleRenderType.TERRAIN_SHEET
+                || sheet == ParticleRenderType.PARTICLE_SHEET_OPAQUE
+                || sheet == ParticleRenderType.PARTICLE_SHEET_TRANSLUCENT
+                || sheet == ParticleRenderType.PARTICLE_SHEET_LIT;
+    }
+
+    /** The bucket every particle of a vanilla sheet goes to, or null when its material is not ready. */
+    private DynamicBucket resolveSheetBucket(ParticleRenderType sheet, BlockTextureManager blockTexMgr) {
+        boolean isTerrain = sheet == ParticleRenderType.TERRAIN_SHEET;
+        RemixMaterial material = resolveMaterial(sheet, blockTexMgr);
+        if (material == null || !material.isAlive()) return null;
+
+        int categoryFlags = isTerrain ? 0 : InstanceCategoryBit.PARTICLE;
+        int blendKind = isTerrain ? BLEND_TERRAIN : BLEND_PARTICLE;
+        return getOrCreateBucket(
+                new BucketKey(material.getHandle(), categoryFlags, blendKind),
+                material, categoryFlags, blendKind);
+    }
+
+    /**
+     * The bucket for a particle of a mod-registered sheet whose sprite lives in a known
+     * atlas. It is drawn as a particle, blended, whichever atlas it samples; a falling
+     * leaf textured from the block atlas is still a particle, not terrain.
+     */
+    private DynamicBucket resolveModdedBucket(RemixMaterial material) {
+        if (material == null || !material.isAlive()) return null;
+        return getOrCreateBucket(
+                new BucketKey(material.getHandle(), InstanceCategoryBit.PARTICLE, BLEND_PARTICLE),
+                material, InstanceCategoryBit.PARTICLE, BLEND_PARTICLE);
     }
 
     private RemixMaterial resolveMaterial(ParticleRenderType sheet, BlockTextureManager blockTexMgr) {

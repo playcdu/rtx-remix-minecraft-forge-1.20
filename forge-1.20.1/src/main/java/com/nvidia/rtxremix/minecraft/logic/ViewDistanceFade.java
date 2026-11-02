@@ -4,6 +4,8 @@
  */
 package com.nvidia.rtxremix.minecraft.logic;
 
+import net.minecraft.util.Mth;
+
 /**
  * Maps Minecraft's render distance onto a conf-layer strength: the shipped
  * 2-chunk endpoint profile blends over the 32-chunk endpoints in
@@ -50,7 +52,7 @@ public final class ViewDistanceFade {
             displayedFadeMax = RESTORE_FADE_MAX;
             return 0.0f;
         }
-        int clamped = Math.clamp(renderDistanceChunks,
+        int clamped = Mth.clamp(renderDistanceChunks,
                 MIN_RENDER_DISTANCE_CHUNKS, MAX_RENDER_DISTANCE_CHUNKS);
         displayedFadeMin = computeFadeMin(clamped);
         displayedFadeMax = computeFadeMax(clamped);

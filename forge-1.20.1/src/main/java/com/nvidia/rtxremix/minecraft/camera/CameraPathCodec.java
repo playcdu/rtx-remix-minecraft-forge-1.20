@@ -132,7 +132,7 @@ final class CameraPathCodec {
             object.addProperty("y", waypoint.y());
             object.addProperty("z", waypoint.z());
             object.addProperty("yaw", waypoint.yaw());
-            object.addProperty("pitch", waypoint.xRot());
+            object.addProperty("pitch", waypoint.pitch());
             if (waypoint.timeOfDay() != null) {
                 object.addProperty("timeOfDay", waypoint.timeOfDay());
             }
@@ -182,7 +182,7 @@ final class CameraPathCodec {
 
     static JsonPrimitive requireNumber(JsonObject object, String name) {
         JsonElement element = requireField(object, name);
-        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumberValue()) {
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
             throw new JsonParseException(name + " must be a number");
         }
         return element.getAsJsonPrimitive();
@@ -190,7 +190,7 @@ final class CameraPathCodec {
 
     static String requireString(JsonObject object, String name) {
         JsonElement element = requireField(object, name);
-        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isStringValue()) {
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
             throw new JsonParseException(name + " must be a string");
         }
         return element.getAsString();

@@ -5,20 +5,20 @@
 package com.nvidia.rtxremix.minecraft.weather;
 
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.systems.VertexSorter;
-import com.nvidia.rtxremix.minecraft.RtxRemixCommonMod;
-import net.fabricmc.fabric.api.client.rendering.v1.CoreShaderRegistrationCallback; // PORT: Fabric API
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.ShaderInstance;
+import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.BufferUploader;
-import net.minecraft.client.render.BuiltBuffer; // PORT: no 1.20.1 equivalent
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexSorting;
+import com.nvidia.rtxremix.minecraft.RtxRemixCommonMod;
 import net.minecraft.client.Camera;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.LightTexture;
-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.client.event.RegisterShadersEvent;
 import org.joml.Matrix4f;
-import org.joml.Matrix4fStack;
 import org.joml.Quaternionf;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL13;
@@ -27,6 +27,7 @@ import org.lwjgl.opengl.GL20;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.system.MemoryStack;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
@@ -40,9 +41,16 @@ import java.util.List;
  * <p>Render thread only, and after Remix has presented its image into GL: the
  * renderer owns its GL buffers and reads the interop textures the frame just
  * produced.
+ *
+ * <p>Vanilla 1.20.1 builds weather in the shared {@code Tesselator} and draws each
+ * texture's batch through {@code Tesselator.end()}. A captured batch is copied into
+ * this renderer's own builder and the shared one released at once, so the shared
+ * builder is never left holding an unreleased batch across the frame.
  */
 public final class RemixWeatherRenderer {
     private static final float NEAR_PLANE = 0.05f;
+    /** Fancy weather's 21x21 columns of one quad each, rain and snow together. */
+    private static final int DEFERRED_INITIAL_VERTICES = 21 * 21 * 4;
     private static final float FAR_PLANE = 1000.0f;
     private static final ResourceLocation RAIN_TEXTURE =
             new ResourceLocation("textures/environment/rain.png");
@@ -50,6 +58,8 @@ public final class RemixWeatherRenderer {
             new ResourceLocation(RtxRemixCommonMod.MOD_ID, "rain_refraction");
 
     private static ShaderInstance rainShader;
+    /** Holds the deferred batches until {@link #render}; created on first capture. */
+    private static BufferBuilder deferredVertices;
 
     private final List<DeferredDraw> draws = new ArrayList<>(2);
     private Matrix4f projection;
@@ -60,12 +70,14 @@ public final class RemixWeatherRenderer {
     private int lastDrawCount;
     private int lastQuadCount;
 
-    public static void registerShaders() {
-        CoreShaderRegistrationCallback.EVENT.register(context ->
-                context.register(
+    /** Mod-bus {@link RegisterShadersEvent} handler: loads {@code rtxremix:rain_refraction}. */
+    public static void registerShaders(RegisterShadersEvent event) throws IOException {
+        event.registerShader(
+                new ShaderInstance(
+                        event.getResourceProvider(),
                         RAIN_SHADER,
-                        DefaultVertexFormat.POSITION_TEXTURE_COLOR_LIGHT,
-                        shader -> rainShader = shader));
+                        DefaultVertexFormat.PARTICLE),
+                shader -> rainShader = shader);
     }
 
     public void beginCaptureFrame(LightTexture lightmapTextureManager) {
@@ -77,7 +89,7 @@ public final class RemixWeatherRenderer {
     }
 
     public void updateCamera(Camera camera, float fovYDegrees, float aspect) {
-        Quaternionf cameraRotation = camera.rotation().similarityTransform(new Quaternionf());
+        Quaternionf cameraRotation = camera.rotation().conjugate(new Quaternionf());
         modelView = new Matrix4f().rotation(cameraRotation);
         projection = new Matrix4f().perspective(
                 (float) Math.toRadians(fovYDegrees),
@@ -86,13 +98,35 @@ public final class RemixWeatherRenderer {
                 FAR_PLANE);
     }
 
-    public void capture(BuiltBuffer buffer, ResourceLocation texture) {
-        if (texture == null) {
-            buffer.close();
-            throw new IllegalStateException("Weather draw did not bind a texture");
+    /**
+     * Defers one weather batch to {@link #render}. Takes ownership of {@code buffer}: it is
+     * copied and released before this returns, whatever the outcome.
+     *
+     * @param buffer  the batch {@code Tesselator.end()} would have drawn, as
+     *                {@code getBuilder().end()} returned it
+     * @param texture the texture vanilla bound to unit 0 for it
+     */
+    public void capture(BufferBuilder.RenderedBuffer buffer, ResourceLocation texture) {
+        BufferBuilder.RenderedBuffer copy;
+        try {
+            if (texture == null) {
+                throw new IllegalStateException("Weather draw did not bind a texture");
+            }
+            BufferBuilder.DrawState state = buffer.drawState();
+            if (state.indexOnly() || buffer.isEmpty()) {
+                return;
+            }
+            if (deferredVertices == null) {
+                deferredVertices = new BufferBuilder(DEFERRED_INITIAL_VERTICES);
+            }
+            deferredVertices.begin(state.mode(), state.format());
+            deferredVertices.putBulkData(buffer.vertexBuffer());
+            copy = deferredVertices.end();
+            capturedQuadCount += state.vertexCount() / 4;
+        } finally {
+            buffer.release();
         }
-        capturedQuadCount += buffer.getDrawParameters().vertexCount() / 4;
-        draws.add(new DeferredDraw(buffer, texture, texture.equals(RAIN_TEXTURE)));
+        draws.add(new DeferredDraw(copy, texture, texture.equals(RAIN_TEXTURE)));
     }
 
     public void render(int finalColorTexture, int depthTexture) {
@@ -133,7 +167,8 @@ public final class RemixWeatherRenderer {
 
     private void renderDeferredDraws(int finalColorTexture) {
         Matrix4f savedProjection = new Matrix4f(RenderSystem.getProjectionMatrix());
-        Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
+        VertexSorting savedSorting = RenderSystem.getVertexSorting();
+        PoseStack modelViewStack = RenderSystem.getModelViewStack();
         boolean depthTest = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
         boolean blend = GL11.glIsEnabled(GL11.GL_BLEND);
         boolean cull = GL11.glIsEnabled(GL11.GL_CULL_FACE);
@@ -150,9 +185,9 @@ public final class RemixWeatherRenderer {
         boolean[] colorMask = readColorMask();
         float[] shaderColor = RenderSystem.getShaderColor().clone();
 
-        RenderSystem.setOrthoMatrix(projection, VertexSorter.BY_Z);
-        modelViewStack.pushMatrix();
-        modelViewStack.set(modelView);
+        RenderSystem.setProjectionMatrix(projection, VertexSorting.ORTHOGRAPHIC_Z);
+        modelViewStack.pushPose();
+        modelViewStack.last().pose().set(modelView);
         RenderSystem.applyModelViewMatrix();
 
         try {
@@ -170,7 +205,7 @@ public final class RemixWeatherRenderer {
                     GL11.GL_ONE,
                     GL11.GL_ZERO);
             GL20.glBlendEquationSeparate(GL14.GL_FUNC_ADD, GL14.GL_FUNC_ADD);
-            RenderSystem.setColor(1.0f, 1.0f, 1.0f, 1.0f);
+            RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
             renderRain(finalColorTexture);
             renderSnow();
         } finally {
@@ -191,10 +226,10 @@ public final class RemixWeatherRenderer {
                     blendSourceAlpha,
                     blendDestinationAlpha);
             GL20.glBlendEquationSeparate(blendEquationRgb, blendEquationAlpha);
-            modelViewStack.popMatrix();
+            modelViewStack.popPose();
             RenderSystem.applyModelViewMatrix();
-            RenderSystem.setOrthoMatrix(savedProjection, VertexSorter.BY_Z);
-            RenderSystem.setColor(
+            RenderSystem.setProjectionMatrix(savedProjection, savedSorting);
+            RenderSystem.setShaderColor(
                     shaderColor[0], shaderColor[1], shaderColor[2], shaderColor[3]);
         }
     }
@@ -268,7 +303,7 @@ public final class RemixWeatherRenderer {
     private void closePendingDraws() {
         for (DeferredDraw draw : draws) {
             if (draw != null) {
-                draw.buffer().close();
+                draw.buffer().release();
             }
         }
         draws.clear();
@@ -290,7 +325,7 @@ public final class RemixWeatherRenderer {
         }
     }
 
-    private record DeferredDraw(BuiltBuffer buffer, ResourceLocation texture, boolean rain) {
+    private record DeferredDraw(BufferBuilder.RenderedBuffer buffer, ResourceLocation texture, boolean rain) {
     }
 
     private static final class DepthSeeder {

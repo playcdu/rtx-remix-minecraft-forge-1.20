@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Intercepts {@link TextureManager#registerTexture} to track dynamic textures
+ * Intercepts {@link TextureManager#register} to track dynamic textures
  * for pixel capture across every upload.
  *
  * <p>Handles three texture types:
@@ -29,14 +29,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *       so {@code PlayerSkinTextureMixin} can capture the uploaded image.</li>
  *   <li>Font glyph pages, which {@code GlyphAtlasTextureMixin} gives a
  *       {@link GlyphPageMirror}: the mirror is registered under the page's id so the
- *       submitter reads it like any other dynamic texture. {@code FontStorage}
+ *       submitter reads it like any other dynamic texture. {@code FontSet}
  *       registers a page before uploading its first glyph.</li>
  * </ul>
  */
 @Mixin(TextureManager.class)
 public class TextureManagerMixin {
 
-    @Inject(method = "register", at = @At("HEAD"))
+    @Inject(method = "register(Lnet/minecraft/resources/ResourceLocation;Lnet/minecraft/client/renderer/texture/AbstractTexture;)V", at = @At("HEAD"))
     private void rtxremix$onRegisterTexture(ResourceLocation id, AbstractTexture texture, CallbackInfo ci) {
         if (texture instanceof DynamicTexture nib) {
             DynamicTextureCache.onRegisterTexture(id, texture, nib.getPixels());

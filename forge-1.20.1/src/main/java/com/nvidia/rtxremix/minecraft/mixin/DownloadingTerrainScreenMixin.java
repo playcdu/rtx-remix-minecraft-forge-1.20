@@ -13,19 +13,23 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Keeps the terrain-download screen up until Remix's world-join burst has settled.
+ * Keeps the terrain-download screen ({@code ReceivingLevelScreen}) up until Remix's
+ * world-join burst has settled.
  *
- * <p>Vanilla closes this screen from its tick as soon as the player's own section has
- * built, which is while Remix pays its first-sight costs behind the screen. The close is
- * cancelled while {@link JoinBurstHold#keepScreen(long)} says so; vanilla retries every
- * tick, so the screen closes on the first tick after the hold ends.
+ * <p>Vanilla closes this screen from its tick, through {@code onClose}, as soon as the
+ * player's own section has built (under Embeddium, once that section is ready in its
+ * renderer), which is while Remix pays its first-sight costs behind the screen. Its
+ * 30-second fallback closes through the same call. The close is cancelled while
+ * {@link JoinBurstHold#keepScreen(long)} says so; vanilla retries every tick, so the
+ * screen closes on the first tick after the hold ends, and the hold's own bound
+ * replaces the fallback while it is active.
  */
 @Mixin(ReceivingLevelScreen.class)
 public abstract class DownloadingTerrainScreenMixin {
 
     private boolean rtxremix$holdBegun;
 
-    @Inject(method = "close", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "onClose", at = @At("HEAD"), cancellable = true)
     private void rtxremix$holdUntilSettled(CallbackInfo ci) {
         JoinBurstHold hold = RemixRenderer.activeJoinBurstHold();
         if (hold == null) {

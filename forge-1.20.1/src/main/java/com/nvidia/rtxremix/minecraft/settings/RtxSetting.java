@@ -128,8 +128,8 @@ public final class RtxSetting<T> {
             // Normalize both sides to that precision so a JSON value such as
             // 0.45 matches a default captured by widening 0.45f to double.
             return Float.compare(
-                    ((Number) value).getAsFloat(),
-                    ((Number) defaultValue).getAsFloat()) == 0;
+                    ((Number) value).floatValue(),
+                    ((Number) defaultValue).floatValue()) == 0;
         }
         return Objects.equals(value, defaultValue);
     }

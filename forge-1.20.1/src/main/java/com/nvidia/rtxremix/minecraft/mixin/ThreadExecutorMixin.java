@@ -21,7 +21,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(BlockableEventLoop.class)
 public abstract class ThreadExecutorMixin {
     @Shadow
-    public abstract String getName();
+    public abstract String name();
 
     @Shadow
     public abstract int getPendingTasksCount();
@@ -29,13 +29,13 @@ public abstract class ThreadExecutorMixin {
     @Inject(method = "doRunTask", at = @At("HEAD"))
     private void rtxremix$beforeExecuteTask(Runnable task, CallbackInfo ci) {
         // This fires for every task on every BlockableEventLoop, the integrated
-        // server's included. getPendingTasksCount() is ConcurrentLinkedQueue.size(), so
-        // it walks the whole backlog: computing it for a hook that is about to
+        // server's included. getPendingTasksCount() is ConcurrentLinkedQueue.size(),
+        // so it walks the whole backlog: computing it for a hook that is about to
         // return makes draining n tasks O(n^2) for nothing. Ask first.
         if (!ProfileScope.isClientTaskDrainActive()) {
             return;
         }
-        ProfileScope.beginThreadExecutorTask(getName(), getPendingTasksCount(), task);
+        ProfileScope.beginThreadExecutorTask(name(), getPendingTasksCount(), task);
     }
 
     @Inject(method = "doRunTask", at = @At("RETURN"))

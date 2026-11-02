@@ -84,7 +84,7 @@ final class CameraPath {
     }
 
     long durationMs() {
-        return waypoints.getLast().timeMs();
+        return waypoints.get(waypoints.size() - 1).timeMs();
     }
 
     /**
@@ -136,7 +136,7 @@ final class CameraPath {
                 waypoint.y(),
                 waypoint.z(),
                 (float) interpolationValues[YAW][index],
-                waypoint.xRot(),
+                waypoint.pitch(),
                 waypoint.timeOfDay()
         );
     }
@@ -177,10 +177,10 @@ final class CameraPath {
             values[X][i] = waypoint.x();
             values[Y][i] = waypoint.y();
             values[Z][i] = waypoint.z();
-            values[PITCH][i] = waypoint.xRot();
+            values[PITCH][i] = waypoint.pitch();
         }
 
-        values[YAW][0] = waypoints.getFirst().yaw();
+        values[YAW][0] = waypoints.get(0).yaw();
         for (int i = 1; i < size; i++) {
             double rawDelta = (double) waypoints.get(i).yaw() - waypoints.get(i - 1).yaw();
             values[YAW][i] = values[YAW][i - 1] + wrapDegrees(rawDelta);
@@ -324,7 +324,7 @@ final class CameraPath {
     }
 
     private static long normalizeTimeOfDay(long timeOfDay) {
-        return Math.positiveModulo(timeOfDay, MINECRAFT_DAY_TICKS);
+        return Math.floorMod(timeOfDay, MINECRAFT_DAY_TICKS);
     }
 
     @Override

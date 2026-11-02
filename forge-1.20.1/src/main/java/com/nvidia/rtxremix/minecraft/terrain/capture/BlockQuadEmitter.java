@@ -9,9 +9,6 @@ import com.nvidia.rtxremix.minecraft.light.BlockLightRuleManager;
 import com.nvidia.rtxremix.minecraft.texture.BlockTextureManager;
 import com.nvidia.rtxremix.minecraft.light.LightEntry;
 import com.nvidia.rtxremix.minecraft.profiling.ProfileScope;
-import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandler; // PORT: Fabric API
-import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandlerRegistry; // PORT: Fabric API
-import net.fabricmc.fabric.api.renderer.v1.model.FabricBakedModel; // PORT: Fabric API
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
@@ -23,6 +20,7 @@ import net.minecraft.client.renderer.ItemBlockRenderTypes;
 import net.minecraft.client.renderer.block.BlockRenderDispatcher;
 import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.client.renderer.block.model.BakedQuad;
+import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.tags.FluidTags;
@@ -33,32 +31,44 @@ import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.levelgen.SingleThreadedRandomSource;
-import net.minecraft.util.RandomSource;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.level.BlockAndTintGetter;
 import net.minecraft.world.level.BlockGetter;
+import net.minecraftforge.client.ChunkRenderTypeSet;
+import net.minecraftforge.client.extensions.common.IClientFluidTypeExtensions;
+import net.minecraftforge.client.model.data.ModelData;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.function.Supplier;
+import java.util.function.Consumer;
 
 /**
- * Per-block mesh emission for RTX Remix, designed to be driven from
- * {@link com.nvidia.rtxremix.minecraft.mixin.SectionBuilderMixin} redirects
- * that piggyback on MC's own block iteration loop.
+ * Per-block mesh emission for RTX Remix, driven from
+ * {@link com.nvidia.rtxremix.minecraft.mixin.EmbeddiumMeshingTaskMixin}, which
+ * piggybacks on Embeddium's own block iteration loop in
+ * {@code ChunkBuilderMeshingTask.execute}.
  *
  * <p>Lifecycle per section:
  * <ol>
- *   <li>{@link #beginSection}: reset state, called at HEAD of build()</li>
- *   <li>{@link #processBlock}: opacity/masks/lights, called per block from isOpaqueFullCube redirect</li>
- *   <li>{@link #emitBlock}: block model quads for MODEL blocks, called from the same
- *       isOpaqueFullCube redirect; vanilla's renderBlock never runs because captured
- *       blocks are reported invisible</li>
- *   <li>{@link #emitFluid}: fluid quads, called from renderFluid redirect</li>
- *   <li>{@link #finishSection}: build SectionBlockData, called at RETURN</li>
+ *   <li>{@link #beginSection}: reset state, called before the task's block loop starts</li>
+ *   <li>{@link #emitBlock}: one render type's model quads, called in place of each
+ *       {@code BlockRenderer.renderModel} call Embeddium makes for a MODEL block, so
+ *       Embeddium's GL meshing never runs while capturing</li>
+ *   <li>{@link #emitFluid}: fluid quads, called in place of {@code FluidRenderer.render}</li>
+ *   <li>{@link #processBlock}: flushes the block's staged quads and records opacity and
+ *       lights, called from the {@code isSolidRender} test Embeddium makes last for every
+ *       block it visits</li>
+ *   <li>{@link #finishSection}: build SectionBlockData once the task returns its output,
+ *       or {@link #abandonSection} when it is cancelled or throws</li>
  * </ol>
+ *
+ * <p>Embeddium skips air that has no block entity without calling anything above, so
+ * nothing here may depend on visiting every position: an unvisited cell is air, which
+ * is exactly what the zeroed opacity bitmap records, and the boundary face masks are
+ * derived from that bitmap when the section finishes.
  *
  * <p>One instance per worker thread via {@code ThreadLocal}.
  */
@@ -76,7 +86,6 @@ public final class BlockQuadEmitter {
     private static final ThreadLocal<Boolean> threadNamed =
             ThreadLocal.withInitial(() -> Boolean.FALSE);
 
-    private final RemixRenderContext renderContext = new RemixRenderContext();
     private final SingleThreadedRandomSource random = new SingleThreadedRandomSource(42);
     private final BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos();
     private final BlockPos.MutableBlockPos neighborPos = new BlockPos.MutableBlockPos();
@@ -113,10 +122,15 @@ public final class BlockQuadEmitter {
     private final FluidState[] fluidStateCache = new FluidState[LOCAL_BLOCK_COUNT];
 
     /**
-     * Results of {@link Block#shouldDrawSide}, keyed like vanilla's own cache by (state,
+     * Results of {@link Block#shouldRenderFace}, keyed like vanilla's own cache by (state,
      * neighbour state, side) and therefore position-independent to the same degree. Vanilla's
      * cache allocates its lookup key on every opaque-neighbour face; this direct-mapped table
      * of packed state ids allocates nothing on a hit and defers to vanilla on a miss.
+     *
+     * <p>Forge adds one position-dependent rule to {@code shouldRenderFace}: a neighbour may
+     * hide the face through {@code hidesNeighborFace}, which a copycat or framed block
+     * answers from its block entity. That rule is evaluated before the table on every face
+     * and never cached, so a cached entry only ever holds the state-keyed remainder.
      */
     private static final int FACE_CULL_CACHE_BITS = 13;
     private static final byte FACE_CULL_UNKNOWN = 0;
@@ -126,8 +140,9 @@ public final class BlockQuadEmitter {
     private final byte[] faceCullResults = new byte[1 << FACE_CULL_CACHE_BITS];
 
     /**
-     * Model-randomisation seed for the block being emitted, mirroring vanilla's
-     * {@code state.getSeed(pos)}. Set once per block in {@link #emitBlock}.
+     * Model-randomisation seed for the block being emitted, the
+     * {@code state.getSeed(pos)} Embeddium hands its own renderer. Set by every
+     * {@link #emitBlock} call.
      *
      * <p>A multi-variant block picks its variant from this, so a constant makes
      * every instance identical. Where the variants are rotations of one model
@@ -136,22 +151,36 @@ public final class BlockQuadEmitter {
      */
     private long modelRandomSeed = 42L;
 
-    private final Supplier<RandomSource> randomSupplier = () -> {
-        random.setSeed(modelRandomSeed);
-        return random;
-    };
+    /** Own random for {@link #classifyBlockLayer(BlockState)}, which any thread may call. */
+    private static final ThreadLocal<SingleThreadedRandomSource> LAYER_RANDOM =
+            ThreadLocal.withInitial(() -> new SingleThreadedRandomSource(42L));
 
     // Per-section state set by beginSection / processBlock
     /**
-     * Whether {@link #beginSection} has run without a matching {@link #finishSection}.
-     * Capture is gated on it, and a build that never reaches its RETURN inject leaves it
-     * set, so the next build on this thread releases the writer's grown buffers before
-     * it starts.
+     * Whether {@link #beginSection} has run without a matching {@link #finishSection} or
+     * {@link #abandonSection}. Capture is gated on it. The meshing hook ends every section
+     * it begins, whichever way the build leaves; should one ever be left open, the next
+     * build on this thread releases the writer's grown buffers before it starts.
      */
     private boolean active;
+    /**
+     * Whether a model layer of the block being visited has been emitted since the last
+     * {@link #processBlock}. Embeddium renders a block's layers back to back and tests
+     * {@code isSolidRender} after them, so the first layer starts the block and
+     * {@code processBlock} ends it.
+     */
+    private boolean blockStarted;
     private BlockTextureManager texManager;
     private BlockRenderDispatcher blockRenderManager;
     private BlockColors blockColors;
+    private TextureAtlas blockAtlas;
+    /**
+     * Receives every sprite the section's quads use, so Embeddium records the animated
+     * ones in the section's info exactly as its own meshing does and keeps ticking them.
+     * Null when no consumer is attached.
+     */
+    private Consumer<TextureAtlasSprite> animatedSpriteSink;
+    private TextureAtlasSprite lastSinkSprite;
     private int baseX, baseY, baseZ;
     private long topMask, bottomMask, eastMask, westMask, southMask, northMask;
     private final long[] opacity = new long[64];
@@ -189,8 +218,8 @@ public final class BlockQuadEmitter {
     // --- Section lifecycle (called from mixin) ---
 
     /**
-     * Initialises emission state for a new section. Called from the
-     * SectionBuilderMixin HEAD inject before MC's block loop starts.
+     * Initialises emission state for a new section. Called from
+     * EmbeddiumMeshingTaskMixin before Embeddium's block loop starts.
      */
     public void beginSection(SectionPos sectionPos,
                              BlockTextureManager tex,
@@ -203,14 +232,20 @@ public final class BlockQuadEmitter {
             writer.releaseBuffers();
         }
         this.active = true;
+        this.blockStarted = false;
         this.texManager = tex;
         this.blockRenderManager = brm;
+        this.animatedSpriteSink = null;
+        this.lastSinkSprite = null;
         this.baseX = sectionPos.minBlockX();
         this.baseY = sectionPos.minBlockY();
         this.baseZ = sectionPos.minBlockZ();
 
         Minecraft client = Minecraft.getInstance();
         this.blockColors = (client != null) ? client.getBlockColors() : null;
+        this.blockAtlas = (client != null)
+                ? client.getModelManager().getAtlas(TextureAtlas.LOCATION_BLOCKS)
+                : null;
 
         writer.beginSection(baseX, baseY, baseZ);
         lights.clear();
@@ -224,6 +259,15 @@ public final class BlockQuadEmitter {
         waterColorKnownMask = 0;
         blockCount = 0;
         fluidCount = 0;
+    }
+
+    /**
+     * Attaches the consumer that receives the sprites this section's quads use, for the
+     * section being built. Cleared by the next {@link #beginSection}.
+     */
+    public void setAnimatedSpriteSink(@Nullable Consumer<TextureAtlasSprite> sink) {
+        this.animatedSpriteSink = sink;
+        this.lastSinkSprite = null;
     }
 
     public boolean isActive() { return active; }
@@ -240,7 +284,7 @@ public final class BlockQuadEmitter {
             }
         }
 
-        RenderShape renderType = state.getRenderType();
+        RenderShape renderType = state.getRenderShape();
         cache = ensureRenderTypeCacheCapacity(id);
         cache[id] = renderType;
         return renderType;
@@ -263,10 +307,18 @@ public final class BlockQuadEmitter {
     }
 
     /**
-     * Captures opacity bitmap, boundary face masks, and light-emitting
-     * blocks. Called once per block from the isOpaqueFullCube redirect.
+     * Ends the visited block: flushes its staged model quads, then captures its
+     * opacity bit and light-emitting rules. Called once per visited block from the
+     * {@code isSolidRender} test, which Embeddium makes after the block's model layers
+     * and fluid. The boundary face masks are derived from the opacity bitmap in
+     * {@link #finishSection}, because Embeddium never visits plain air.
      */
     public void processBlock(BlockState state, BlockGetter world, BlockPos pos, boolean opaque) {
+        if (blockStarted) {
+            writer.flushBlock(texManager);
+            blockStarted = false;
+        }
+
         int lx = SectionPos.sectionRelative(pos.getX());
         int ly = SectionPos.sectionRelative(pos.getY());
         int lz = SectionPos.sectionRelative(pos.getZ());
@@ -282,15 +334,6 @@ public final class BlockQuadEmitter {
             opacity[word] &= ~bit;
         }
 
-        if (!opaque && (ly == 0 || ly == 15 || lx == 0 || lx == 15 || lz == 0 || lz == 15)) {
-            if (ly == 15) topMask    |= 1L << ((lz >> 1) * 8 + (lx >> 1));
-            if (ly == 0)  bottomMask |= 1L << ((lz >> 1) * 8 + (lx >> 1));
-            if (lx == 15) eastMask   |= 1L << ((ly >> 1) * 8 + (lz >> 1));
-            if (lx == 0)  westMask   |= 1L << ((ly >> 1) * 8 + (lz >> 1));
-            if (lz == 15) southMask  |= 1L << ((ly >> 1) * 8 + (lx >> 1));
-            if (lz == 0)  northMask  |= 1L << ((ly >> 1) * 8 + (lx >> 1));
-        }
-
         if (state.isAir()) return;
         if (!BlockLightRuleManager.hasMatchingRules(state)) return;
 
@@ -299,8 +342,8 @@ public final class BlockQuadEmitter {
         //
         // Lights resolve against the unoffset block position, and the sampler
         // reads the unoffset baked model, while emitBlock folds
-        // state.getModelOffset into the geometry origin. No vanilla block
-        // combines an AbstractBlock.OffsetType with a luminance, so the two
+        // state.getOffset into the geometry origin. No vanilla block
+        // combines a BlockBehaviour.OffsetType with a luminance, so the two
         // frames agree for every vanilla block; a modded or resource-pack rule
         // on an offset block would need the same offset passed into begin() and
         // into the LightEntry positions.
@@ -310,35 +353,42 @@ public final class BlockQuadEmitter {
     }
 
     /**
-     * Emits block model quads for the current block. Called from the
-     * isOpaqueFullCube redirect for blocks vanilla would hand to renderBlock,
-     * a call the build then skips by reporting the block invisible. Bypasses
-     * FRAPI/Indigo and writes directly to the DirectQuadWriter.
+     * Stages one render type's model quads for the block being visited. Called in place
+     * of each {@code BlockRenderer.renderModel} call Embeddium makes for a MODEL block,
+     * with what Embeddium resolved for it: the model (unwrapped from its weighted
+     * variants), the block's Forge {@link ModelData}, the render type, and the
+     * per-position seed. Bypasses Embeddium's renderer and writes to the
+     * DirectQuadWriter; the staged quads of all the block's layers are flushed together
+     * by {@link #processBlock}, so overlay detection sees the whole block.
      */
-    public void emitBlock(BlockState state, BlockPos pos, BlockAndTintGetter world) {
-        blockCount++;
-        mutablePos.set(pos);
-        tintValidMask = 0;
+    public void emitBlock(BlockState state, BlockPos pos, BlockAndTintGetter world,
+                          BakedModel model, ModelData modelData, RenderType renderType, long seed) {
+        if (!blockStarted) {
+            blockStarted = true;
+            blockCount++;
+            mutablePos.set(pos);
+            tintValidMask = 0;
+        }
 
-        // Vanilla derives model randomisation from the block position, in the
-        // same BlockModelRenderer.render this emitter replaces. It also
-        // re-seeds before every getQuads call, which the loops below match.
-        modelRandomSeed = state.getSeed(pos);
+        // Embeddium derives model randomisation from the block position exactly as
+        // vanilla's BlockModelRenderer does, and re-seeds before every getQuads call,
+        // which the loop below matches.
+        modelRandomSeed = seed;
 
         float lx = SectionPos.sectionRelative(pos.getX());
         float ly = SectionPos.sectionRelative(pos.getY());
         float lz = SectionPos.sectionRelative(pos.getZ());
 
-        // Vanilla applies the per-position model offset (AbstractBlock.OffsetType
+        // Embeddium applies the per-position model offset (BlockBehaviour.OffsetType
         // XZ/XYZ: flowers, saplings, grass, dripstone) inside
-        // BlockModelRenderer.render, which this emitter replaces wholesale.
+        // BlockRenderer.renderModel, which this emitter replaces wholesale.
         // Applying it here is what keeps Remix geometry on the same spot as
-        // vanilla's.
+        // Embeddium's.
         //
         // Folded into the section-local origin rather than applied per vertex:
-        // both model paths already add that origin to every position, so the
-        // offset rides along for free. hasModelOffset() is a bare null check on
-        // the block's offsetter, while getModelOffset() allocates a Vec3, so
+        // the model path already adds that origin to every position, so the
+        // offset rides along for free. hasOffsetFunction() is a bare null check on
+        // the block's offsetter, while getOffset() allocates a Vec3, so
         // the gate keeps that allocation off a path that runs for every block in
         // every section build.
         //
@@ -352,19 +402,25 @@ public final class BlockQuadEmitter {
             lz += (float) modelOffset.z;
         }
 
-        BakedModel model = blockRenderManager.getBlockModel(state);
-        String layerName = classifyBlockLayer(state);
+        String layerName = classifyBlockLayer(state, renderType);
 
-        if (model instanceof FabricBakedModel fbm && !fbm.isVanillaAdapter()) {
-            emitFrapiBlock(world, state, model, fbm, layerName, lx, ly, lz);
-        } else {
-            emitVanillaBlock(world, state, model, layerName, lx, ly, lz);
+        for (Direction dir : ALL_DIRECTIONS) {
+            if (dir != null && !shouldDrawBlockSide(world, state, dir)) {
+                continue;
+            }
+
+            random.setSeed(modelRandomSeed);
+            List<BakedQuad> bakedQuads = model.getQuads(state, dir, random, modelData, renderType);
+
+            for (int i = 0, n = bakedQuads.size(); i < n; i++) {
+                stageBakedQuad(bakedQuads.get(i), layerName, state, world, lx, ly, lz);
+            }
         }
     }
 
     /**
-     * Emits fluid quads for the current block. Called from the
-     * renderFluid redirect.
+     * Emits fluid quads for the current block. Called in place of Embeddium's
+     * {@code FluidRenderer.render}.
      */
     public void emitFluid(BlockPos pos, BlockAndTintGetter world, FluidState fluidState) {
         fluidCount++;
@@ -382,36 +438,72 @@ public final class BlockQuadEmitter {
     public SectionBlockData finishSection(SectionPos sectionPos) {
         try (ProfileScope finishScope = ProfileScope.begin("finishSection")) {
             finishScope.blockCount(blockCount).fluidCount(fluidCount);
+            if (blockStarted) {
+                writer.flushBlock(texManager);
+                blockStarted = false;
+            }
+            computeFaceMasks();
             SectionMeshData meshData = writer.buildMeshData();
-            SectionBlockData result = new SectionBlockData(
-                    sectionPos, meshData, List.copyOf(lights), topMask, bottomMask,
-                    eastMask, westMask, southMask, northMask,
-                    Arrays.copyOf(opacity, opacity.length));
+            SectionBlockData result;
+            try {
+                result = new SectionBlockData(
+                        sectionPos, meshData, List.copyOf(lights), topMask, bottomMask,
+                        eastMask, westMask, southMask, northMask,
+                        Arrays.copyOf(opacity, opacity.length));
+            } catch (RuntimeException failure) {
+                // The mesh owns pooled buffers from here on; nothing else would release them.
+                meshData.release();
+                throw failure;
+            }
             lights.clear();
             return result;
         } finally {
             active = false;
+            animatedSpriteSink = null;
+            lastSinkSprite = null;
         }
     }
 
-    private void emitVanillaBlock(BlockAndTintGetter world, BlockState state,
-                                   BakedModel model, String layerName,
-                                   float lx, float ly, float lz) {
+    /**
+     * Drops the section in progress without producing data, for a build that was
+     * cancelled or threw. Nothing pooled is held yet: the writer's work buffers are
+     * its own and are reset by the next {@link #beginSection}, and the section's mesh
+     * data only exists once {@link #finishSection} builds it.
+     */
+    public void abandonSection() {
+        active = false;
+        blockStarted = false;
+        lights.clear();
+        animatedSpriteSink = null;
+        lastSinkSprite = null;
+    }
 
-        for (Direction dir : ALL_DIRECTIONS) {
-            if (dir != null && !shouldDrawBlockSide(world, state, dir)) {
-                continue;
-            }
-
-            random.setSeed(modelRandomSeed);
-            List<BakedQuad> bakedQuads = model.getQuads(state, dir, random);
-
-            for (BakedQuad bq : bakedQuads) {
-                stageBakedQuad(bq, layerName, state, world, lx, ly, lz);
+    /**
+     * Derives the boundary face masks from the opacity bitmap: a 2x2 sub-region of a
+     * boundary face is open when any of its cells is not an opaque full cube. Every cell
+     * Embeddium skipped is air and therefore open, which the zeroed bitmap already says.
+     */
+    private void computeFaceMasks() {
+        topMask = bottomMask = eastMask = westMask = southMask = northMask = 0;
+        // Each face is an 8x8 grid of 2x2 sub-regions indexed (a >> 1) * 8 + (b >> 1),
+        // with (a, b) = (lz, lx) on top/bottom, (ly, lz) on east/west and (ly, lx) on
+        // south/north, as SectionBlockData documents.
+        for (int a = 0; a < SECTION_SIZE; a++) {
+            for (int b = 0; b < SECTION_SIZE; b++) {
+                long bit = 1L << ((a >> 1) * 8 + (b >> 1));
+                if (!isOpaque(b, 15, a)) topMask |= bit;
+                if (!isOpaque(b, 0, a)) bottomMask |= bit;
+                if (!isOpaque(15, a, b)) eastMask |= bit;
+                if (!isOpaque(0, a, b)) westMask |= bit;
+                if (!isOpaque(b, a, 15)) southMask |= bit;
+                if (!isOpaque(b, a, 0)) northMask |= bit;
             }
         }
+    }
 
-        writer.flushBlock(texManager);
+    private boolean isOpaque(int lx, int ly, int lz) {
+        int idx = localIndex(lx, ly, lz);
+        return (opacity[idx >> 6] & (1L << (idx & 63))) != 0;
     }
 
     private void stageBakedQuad(BakedQuad bq, String layerName,
@@ -450,7 +542,10 @@ public final class BlockQuadEmitter {
         }
 
         TextureAtlasSprite sprite = bq.getSprite();
-        ResourceLocation spriteId = sprite != null ? sprite.contents().get3DDataValue() : null;
+        ResourceLocation spriteId = sprite != null ? sprite.contents().name() : null;
+        if (sprite != null) {
+            offerSprite(sprite);
+        }
         if (isWaterSprite(spriteId)) {
             emitBlockWaterQuad(nx, ny, nz, color, layerName);
             return;
@@ -501,62 +596,33 @@ public final class BlockQuadEmitter {
                 null, 0, 0, 1, 1, layerName, texManager);
     }
 
-    // --- FRAPI model path ---
-
-    private BlockState frapiState;
-    private BlockAndTintGetter frapiWorld;
-
-    private boolean frapiCullTest(Direction dir) {
-        return !shouldDrawBlockSide(frapiWorld, frapiState, dir);
-    }
-
-    private void emitFrapiBlock(BlockAndTintGetter world, BlockState state,
-                                 BakedModel model, FabricBakedModel fbm,
-                                 String layerName, float lx, float ly, float lz) {
-
-        frapiState = state;
-        frapiWorld = world;
-
-        renderContext.prepare(world, state, mutablePos.immutable(), this::frapiCullTest);
-
-        fbm.emitBlockQuads(world, state, mutablePos.immutable(), randomSupplier, renderContext);
-
-        List<SectionBlockData.BlockQuad> frapiQuads = renderContext.harvest();
-        for (SectionBlockData.BlockQuad fq : frapiQuads) {
-            float[] fqPos = fq.positions();
-            for (int v = 0; v < 4; v++) {
-                tempPositions[v * 3]     = fqPos[v * 3]     + lx;
-                tempPositions[v * 3 + 1] = fqPos[v * 3 + 1] + ly;
-                tempPositions[v * 3 + 2] = fqPos[v * 3 + 2] + lz;
-            }
-
-            writer.stageQuad(tempPositions, fq.uvs(), fq.nx(), fq.ny(), fq.nz(),
-                    fq.color(), fq.spriteId(),
-                    fq.spriteU0(), fq.spriteV0(), fq.spriteU1(), fq.spriteV1(),
-                    layerName);
-        }
-
-        writer.flushBlock(texManager);
-    }
-
     // --- Fluid geometry ---
 
     private void emitFluidQuads(BlockAndTintGetter world, FluidState fluidState,
                                  int lx, int ly, int lz) {
-        FluidRenderHandler handler = FluidRenderHandlerRegistry.INSTANCE.get(fluidState.getType());
-        if (handler == null) return;
+        if (blockAtlas == null) return;
+        // Forge's replacement for Fabric's FluidRenderHandler: every fluid type carries
+        // its client extension, which names the still and flowing textures and the tint.
+        IClientFluidTypeExtensions fluidType = IClientFluidTypeExtensions.of(fluidState);
 
         fluidPos.set(baseX + lx, baseY + ly, baseZ + lz);
 
-        TextureAtlasSprite[] fluidSprites = handler.getFluidSprites(world, fluidPos, fluidState);
-        if (fluidSprites == null || fluidSprites.length < 2) return;
+        // The atlas lookups are what ForgeHooksClient.getFluidSprites does, without the
+        // array it allocates for every fluid block.
+        ResourceLocation stillTexture = fluidType.getStillTexture(fluidState, world, fluidPos);
+        ResourceLocation flowTexture = fluidType.getFlowingTexture(fluidState, world, fluidPos);
+        if (stillTexture == null || flowTexture == null) return;
+        TextureAtlasSprite stillSprite = blockAtlas.getSprite(stillTexture);
+        TextureAtlasSprite flowSprite = blockAtlas.getSprite(flowTexture);
+        offerSprite(stillSprite);
+        offerSprite(flowSprite);
 
         boolean isLava = fluidState.is(FluidTags.LAVA);
         boolean isWater = !isLava;
         String layer = isLava ? "solid" : "translucent";
         int fluidColor = isWater
-                ? getCachedWaterColor(handler, world, fluidState, lx, ly, lz)
-                : handler.getFluidColor(world, fluidPos, fluidState);
+                ? getCachedWaterColor(fluidType, world, fluidState, lx, ly, lz)
+                : fluidType.getTintColor(fluidState, world, fluidPos);
         int r = (fluidColor >> 16) & 0xFF, g = (fluidColor >> 8) & 0xFF, b = fluidColor & 0xFF;
         int color = 0xFF000000 | (r << 16) | (g << 8) | b;
 
@@ -568,14 +634,11 @@ public final class BlockQuadEmitter {
         float tileSize = BlockTextureManager.getWaterTileSize();
         int wx = baseX + lx, wy = baseY + ly, wz = baseZ + lz;
 
-        TextureAtlasSprite stillSprite = fluidSprites[0];
-        TextureAtlasSprite flowSprite = fluidSprites[1];
-
-        ResourceLocation stillId = stillSprite.contents().get3DDataValue();
+        ResourceLocation stillId = stillSprite.contents().name();
         float su0 = stillSprite.getU0(), sv0 = stillSprite.getV0();
         float su1 = stillSprite.getU1(), sv1 = stillSprite.getV1();
 
-        ResourceLocation flowId = flowSprite.contents().get3DDataValue();
+        ResourceLocation flowId = flowSprite.contents().name();
         float fu0 = flowSprite.getU0(), fv0 = flowSprite.getV0();
         float fu1 = flowSprite.getU1(), fv1 = flowSprite.getV1();
 
@@ -627,10 +690,10 @@ public final class BlockQuadEmitter {
                     float cos = Mth.cos(angle) * 0.25f;
                     // Vanilla's corners in its order (0,0) (0,1) (1,1) (1,0), reordered to
                     // this emitter's (0,0) (1,0) (1,1) (0,1).
-                    float c00u = flowSprite.getU(0.5f - cos - sin), c00v = flowSprite.getV(0.5f - cos + sin);
-                    float c01u = flowSprite.getU(0.5f - cos + sin), c01v = flowSprite.getV(0.5f + cos + sin);
-                    float c11u = flowSprite.getU(0.5f + cos + sin), c11v = flowSprite.getV(0.5f + cos - sin);
-                    float c10u = flowSprite.getU(0.5f + cos - sin), c10v = flowSprite.getV(0.5f - cos - sin);
+                    float c00u = frameU(flowSprite, 0.5f - cos - sin), c00v = frameV(flowSprite, 0.5f - cos + sin);
+                    float c01u = frameU(flowSprite, 0.5f - cos + sin), c01v = frameV(flowSprite, 0.5f + cos + sin);
+                    float c11u = frameU(flowSprite, 0.5f + cos + sin), c11v = frameV(flowSprite, 0.5f + cos - sin);
+                    float c10u = frameU(flowSprite, 0.5f + cos - sin), c10v = frameV(flowSprite, 0.5f - cos - sin);
                     setUv4(tempUvs, c00u, c00v, c10u, c10v, c11u, c11v, c01u, c01v);
                     writer.writeFluidQuad(tempPositions, tempUvs, 0, 1, 0, color,
                             flowId, fu0, fv0, fu1, fv1, layer, texManager);
@@ -722,11 +785,11 @@ public final class BlockQuadEmitter {
                 // sprite, so U spans its left half and V runs from the fluid surface
                 // ((1 - height) / 2) down to the half-way line. The full sprite over a
                 // one-block face showed the texture at twice the density.
-                float sideU0 = flowSprite.getU(0.0f);
-                float sideU1 = flowSprite.getU(0.5f);
-                float sideVBottom = flowSprite.getV(0.5f);
-                float sideVTop0 = flowSprite.getV((1.0f - sideH0) * 0.5f);
-                float sideVTop1 = flowSprite.getV((1.0f - sideH1) * 0.5f);
+                float sideU0 = frameU(flowSprite, 0.0f);
+                float sideU1 = frameU(flowSprite, 0.5f);
+                float sideVBottom = frameV(flowSprite, 0.5f);
+                float sideVTop0 = frameV(flowSprite, (1.0f - sideH0) * 0.5f);
+                float sideVTop1 = frameV(flowSprite, (1.0f - sideH1) * 0.5f);
                 setUv4(tempUvs, sideU0, sideVBottom, sideU1, sideVBottom, sideU1, sideVTop1, sideU0, sideVTop0);
                 writer.writeFluidQuad(tempPositions, tempUvs, fnx, fny, fnz, color,
                         flowId, fu0, fv0, fu1, fv1, layer, texManager);
@@ -759,7 +822,7 @@ public final class BlockQuadEmitter {
                                       boolean neighborOpaque, VoxelShape neighborShape) {
         if (!neighborOpaque) return false;
 
-        VoxelShape fluidShape = Shapes.create(0.0, 0.0, 0.0, 1.0, fluidHeight, 1.0);
+        VoxelShape fluidShape = Shapes.box(0.0, 0.0, 0.0, 1.0, fluidHeight, 1.0);
         return Shapes.blockOccudes(fluidShape, neighborShape, direction);
     }
 
@@ -883,12 +946,12 @@ public final class BlockQuadEmitter {
         return count > 0 ? totalHeight / count : 0.5f;
     }
 
-    private int getCachedWaterColor(FluidRenderHandler handler, BlockAndTintGetter world,
+    private int getCachedWaterColor(IClientFluidTypeExtensions fluidType, BlockAndTintGetter world,
                                     FluidState fluidState, int lx, int ly, int lz) {
         int cell = ((ly >> 3) << 4) | ((lz >> 2) << 2) | (lx >> 2);
         int bit = 1 << cell;
         if ((waterColorKnownMask & bit) == 0) {
-            waterColorCache[cell] = handler.getFluidColor(world, fluidPos, fluidState);
+            waterColorCache[cell] = fluidType.getTintColor(fluidState, world, fluidPos);
             waterColorKnownMask |= bit;
         }
         return waterColorCache[cell];
@@ -901,6 +964,14 @@ public final class BlockQuadEmitter {
         int neighborY = mutablePos.getY() + side.getStepY();
         int neighborZ = mutablePos.getZ() + side.getStepZ();
         BlockState neighbor = getCachedBlockState(world, neighborX, neighborY, neighborZ);
+        // Forge's position-dependent face hiding, in Embeddium's order: the neighbour's
+        // answer first, because it defaults to false without a lookup, while
+        // supportsExternalFaceHiding resolves the block's render types.
+        neighborPos.set(neighborX, neighborY, neighborZ);
+        if (neighbor.hidesNeighborFace(world, neighborPos, state, side.getOpposite())
+                && state.supportsExternalFaceHiding()) {
+            return false;
+        }
         long key = ((long) Block.getId(state) << 35)
                 | ((long) Block.getId(neighbor) << 3)
                 | side.ordinal();
@@ -909,7 +980,6 @@ public final class BlockQuadEmitter {
             return faceCullResults[slot] == FACE_CULL_DRAWN;
         }
 
-        neighborPos.set(neighborX, neighborY, neighborZ);
         boolean drawn = Block.shouldRenderFace(state, world, mutablePos, side, neighborPos);
         faceCullKeys[slot] = key;
         faceCullResults[slot] = drawn ? FACE_CULL_DRAWN : FACE_CULL_HIDDEN;
@@ -990,21 +1060,80 @@ public final class BlockQuadEmitter {
      * The terrain layer a block's quads are bucketed under, by
      * {@link BlockTextureManager#layerType} name. A held block item asks the same
      * question, so it shades as its placed counterpart does.
+     *
+     * <p>Forge models choose their render types per model (a {@code render_type} in the
+     * model JSON, or {@code getRenderTypes}), which the deprecated
+     * {@link ItemBlockRenderTypes#getChunkRenderType} ignores, so this asks the block's
+     * model. A model drawing several layers is classified by the first of them in chunk
+     * layer order, its base layer; terrain classifies each layer separately through
+     * {@link #classifyBlockLayer(BlockState, RenderType)}.
      */
     public static String classifyBlockLayer(BlockState state) {
-        // Vanilla draws clear glass as a cutout: the texture is alpha 0 between
-        // the frame pixels and the GL path simply discards those. Remix can
-        // refract through it instead, so clear glass takes its own layer and a
-        // translucent material with the frame as a diffuse layer.
-        // Stained glass is already translucent and keeps vanilla's layer.
-        if (state.is(Blocks.GLASS) || state.is(Blocks.GLASS_PANE)) return "glass";
-        RenderType layer = ItemBlockRenderTypes.getChunkRenderType(state);
+        if (isClearGlass(state)) return "glass";
+        Minecraft client = Minecraft.getInstance();
+        if (client == null) return "solid";
+        BakedModel model = client.getBlockRenderer().getBlockModel(state);
+        SingleThreadedRandomSource layerRandom = LAYER_RANDOM.get();
+        layerRandom.setSeed(42L);
+        ChunkRenderTypeSet layers = model.getRenderTypes(state, layerRandom, ModelData.EMPTY);
+        for (RenderType layer : layers) {
+            return layerName(layer);
+        }
+        return "solid";
+    }
+
+    /**
+     * The terrain layer for the quads one render type of a block's model draws, as
+     * Embeddium hands that render type to its renderer.
+     */
+    public static String classifyBlockLayer(BlockState state, RenderType layer) {
+        if (isClearGlass(state)) return "glass";
+        return layerName(layer);
+    }
+
+    /**
+     * Vanilla draws clear glass as a cutout: the texture is alpha 0 between
+     * the frame pixels and the GL path simply discards those. Remix can
+     * refract through it instead, so clear glass takes its own layer and a
+     * translucent material with the frame as a diffuse layer.
+     * Stained glass is already translucent and keeps vanilla's layer.
+     */
+    private static boolean isClearGlass(BlockState state) {
+        return state.is(Blocks.GLASS) || state.is(Blocks.GLASS_PANE);
+    }
+
+    private static String layerName(RenderType layer) {
         if (layer == RenderType.solid()) return "solid";
         if (layer == RenderType.cutoutMipped()) return "cutout_mipped";
         if (layer == RenderType.cutout()) return "cutout";
         if (layer == RenderType.translucent()) return "translucent";
         if (layer == RenderType.tripwire()) return "cutout";
         return "solid";
+    }
+
+    /**
+     * Hands a sprite the section's geometry uses to the attached sink. Consecutive
+     * repeats are dropped, which covers the common run of one sprite per block.
+     */
+    private void offerSprite(TextureAtlasSprite sprite) {
+        Consumer<TextureAtlasSprite> sink = animatedSpriteSink;
+        if (sink == null || sprite == lastSinkSprite) return;
+        lastSinkSprite = sprite;
+        sink.accept(sprite);
+    }
+
+    /**
+     * A position inside the sprite as a fraction of its width, the 1.21
+     * {@code getFrameU} the fluid mapping is written in; 1.20.1's
+     * {@link TextureAtlasSprite#getU} takes sixteenths.
+     */
+    private static float frameU(TextureAtlasSprite sprite, float fraction) {
+        return sprite.getU(fraction * 16.0f);
+    }
+
+    /** Vertical counterpart of {@link #frameU}. */
+    private static float frameV(TextureAtlasSprite sprite, float fraction) {
+        return sprite.getV(fraction * 16.0f);
     }
 
     private static void setPos4(float[] out,

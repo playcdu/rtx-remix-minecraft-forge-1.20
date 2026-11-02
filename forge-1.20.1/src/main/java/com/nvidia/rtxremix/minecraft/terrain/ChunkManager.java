@@ -39,12 +39,12 @@ import com.nvidia.rtxremix.RemixAPI;
 import com.nvidia.rtxremix.Transform;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.core.SectionPos;
-import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -204,9 +204,9 @@ public class ChunkManager {
                     }
                 }
                 if (transferOwnership) {
-                    oldEntry.lights().clearAllBlockEntities();
-                    oldEntry.lightEntries().clearAllBlockEntities();
-                    oldEntry.lightFingerprints().clearAllBlockEntities();
+                    oldEntry.lights().clear();
+                    oldEntry.lightEntries().clear();
+                    oldEntry.lightFingerprints().clear();
                 }
             }
 
@@ -259,7 +259,7 @@ public class ChunkManager {
             RemixLightStore.get().create(light);
             TerrainLight record = new TerrainLight(light);
             record.place(incoming.x(), incoming.y(), incoming.z(),
-                    LightPower.atLowerCornerOf(incoming, radiance.r(), radiance.g(), radiance.b()));
+                    LightPower.of(incoming, radiance.r(), radiance.g(), radiance.b()));
             entry.putLight(mutation.key(), record);
             entry.lightFingerprints().put(mutation.key(), mutation.fingerprint());
             terrain.adjustSectionLightCount(
@@ -274,14 +274,14 @@ public class ChunkManager {
             LightInfo info = buildBlockLightInfo(incoming, radiance);
             RemixLightStore.get().update(mutation.existing(), info);
             record.place(incoming.x(), incoming.y(), incoming.z(),
-                    LightPower.atLowerCornerOf(incoming, radiance.r(), radiance.g(), radiance.b()));
+                    LightPower.of(incoming, radiance.r(), radiance.g(), radiance.b()));
             entry.lightFingerprints().put(mutation.key(), mutation.fingerprint());
         }
 
         private void removeLight(LightMutation mutation) {
             TerrainLight record = entry.lights().get(mutation.key());
             if (record == null || record.light != mutation.existing()) return;
-            if (!mutation.existing().isDeleted()) mutation.existing().onDestroyed();
+            if (!mutation.existing().isDeleted()) mutation.existing().destroy();
             if (entry.removeLight(mutation.key()) != null) {
                 terrain.adjustSectionLightCount(
                         section.cx(), section.sy(), section.cz(), entry, -1);
@@ -311,7 +311,7 @@ public class ChunkManager {
         public void runOne() {
             RemixLight light = lights.get(cursor);
             try {
-                if (!light.isDeleted()) light.onDestroyed();
+                if (!light.isDeleted()) light.destroy();
             } catch (RuntimeException failure) {
                 lights.add(lights.remove(cursor));
                 throw failure;
@@ -462,9 +462,7 @@ public class ChunkManager {
     private int cntCap = -1, cntLightsCulled, cntLightsDrawn, cntLightsBeyondReach, cntReachable, cntWorkerMem, cntPooledDirectMB,
             cntBucketGrows, cntBucketGrowKB, cntPendingBuilds, cntPendingMeshMB, cntCaptureQueue,
             cntCaptureQueueMB, cntCaptureBackpressure, cntCaptureEvicted, cntLightRebuildsSkipped,
-            cntNeighbourReflagsDropped, cntNeighbourReflagsKept, cntIncompleteFirstBuilds, cntPacedChunks,
-            cntPacedBacklog, cntChunkApplyUs, cntPacedUnloads, cntPacedUnloadBacklog, cntChunkUnloadUs,
-            cntSurfaceScansSeeded, cntReadyMeshes, cntMeshRetireQueue,
+            cntReadyMeshes, cntMeshRetireQueue,
             cntMeshRetireMB, cntLightOpsPending, cntLightTasks,
             cntKnownSections, cntColumns, cntPublishedColumns, cntGeometryColumns,
             cntMissingColumns, cntMissingSections, cntRetainedPages,
@@ -512,7 +510,7 @@ public class ChunkManager {
             return thread;
         });
 
-        LOGGER.printDebugLog("ChunkManager init (retained chunk columns, {} mesh workers, {} pending builds)",
+        LOGGER.info("ChunkManager init (retained chunk columns, {} mesh workers, {} pending builds)",
                 MESH_BUILD_THREADS, MAX_PENDING);
     }
 
@@ -595,9 +593,29 @@ public class ChunkManager {
         return stats;
     }
 
+    /**
+     * A chunk column left the client world. Fed by Forge's client {@code ChunkEvent.Unload}
+     * alone: Embeddium's own {@code onChunkRemoved} follows its readiness tracking (a column
+     * and all eight neighbours loaded and lit), so it fires for columns that are still
+     * loaded and never for an edge column that was already not ready when it unloads.
+     */
     public void onChunkUnloaded(ChunkPos p) {
         BlockDataQueue.markChunkUnloaded(p.x, p.z);
         chunkUnloadEvents.add(packChunkKey(p.x, p.z));
+    }
+
+    /**
+     * Embeddium settled section (cx, sy, cz) as empty without running a meshing task:
+     * its {@code WorldSlice.prepare} declines a task for an all-air section, both when a
+     * rebuild finds the section emptied and when a column becomes ready with the
+     * section already empty. No capture will ever replace terrain Remix still holds
+     * there, so it is queued for removal; the drain validates the live section first.
+     * Render thread only.
+     */
+    public void onSectionSettledEmpty(int cx, int sy, int cz) {
+        if (terrain.findSection(cx, sy, cz) != null) {
+            SectionLeftRenderSetQueue.enqueueEmptyCandidate(cx, sy, cz);
+        }
     }
 
     private static long packChunkKey(int cx, int cz) {
@@ -611,7 +629,7 @@ public class ChunkManager {
 
             if (world != currentWorld) {
                 if (currentWorld != null) {
-                    LOGGER.printDebugLog("World changed, clearing terrain");
+                    LOGGER.info("World changed, clearing terrain");
                     clear();
                 }
                 currentWorld = world;
@@ -651,16 +669,6 @@ public class ChunkManager {
                 cntCaptureBackpressure = timer.registerCounter("Chunk.CaptureBlocked");
                 cntCaptureEvicted = timer.registerCounter("Chunk.CaptureEvicted");
                 cntLightRebuildsSkipped = timer.registerCounter("Chunk.LightRebuildsSkipped");
-                cntNeighbourReflagsDropped = timer.registerCounter("Chunk.NeighbourReflagsDropped");
-                cntNeighbourReflagsKept = timer.registerCounter("Chunk.NeighbourReflagsKept");
-                cntIncompleteFirstBuilds = timer.registerCounter("Chunk.IncompleteFirstBuilds");
-                cntPacedChunks = timer.registerCounter("Chunk.PacedChunks");
-                cntPacedBacklog = timer.registerCounter("Chunk.PacedBacklog");
-                cntChunkApplyUs = timer.registerCounter("Chunk.ApplyUsPerChunk");
-                cntPacedUnloads = timer.registerCounter("Chunk.PacedUnloads");
-                cntPacedUnloadBacklog = timer.registerCounter("Chunk.PacedUnloadBacklog");
-                cntChunkUnloadUs = timer.registerCounter("Chunk.UnloadUsPerChunk");
-                cntSurfaceScansSeeded = timer.registerCounter("Chunk.SurfaceScansSeeded");
                 cntPagesInstalled = timer.registerCounter("Chunk.PagesInstalled");
                 cntInstallBytes = timer.registerCounter("Chunk.InstallBytes");
                 cntInstancesAdded = timer.registerCounter("Chunk.InstancesAdded");
@@ -709,16 +717,6 @@ public class ChunkManager {
                 timer.count(cntCaptureEvicted, BlockDataQueue.drainBackpressureEvictions());
                 reflagEvictedSections();
                 timer.count(cntLightRebuildsSkipped, SkippedSectionRebuilds.drainLightOnly());
-                timer.count(cntNeighbourReflagsDropped, SkippedSectionRebuilds.drainNeighbourInSnapshot());
-                timer.count(cntNeighbourReflagsKept, NeighbourReflagFilter.drainKept());
-                timer.count(cntIncompleteFirstBuilds, NeighbourReflagFilter.drainIncompleteFirstBuilds());
-                timer.count(cntPacedChunks, LocalChunkBatchPacing.drainPacedChunks());
-                timer.count(cntPacedBacklog, LocalChunkBatchPacing.pacedBacklog());
-                timer.count(cntChunkApplyUs, LocalChunkBatchPacing.applyMicrosPerChunk());
-                timer.count(cntPacedUnloads, LocalChunkBatchPacing.drainPacedUnloads());
-                timer.count(cntPacedUnloadBacklog, LocalChunkBatchPacing.pacedUnloadBacklog());
-                timer.count(cntChunkUnloadUs, LocalChunkBatchPacing.unloadMicrosPerChunk());
-                timer.count(cntSurfaceScansSeeded, SkyLightSurfaceScanPolicy.drainSeeded());
 
                 advanceZombieAudit(maintenanceDeadline);
                 submitDirtyBuilds(tex, pcx, pcz);
@@ -787,7 +785,7 @@ public class ChunkManager {
             int cz = (int) chunkKey;
             LevelChunk liveChunk = currentWorld == null
                     ? null
-                    : currentWorld.getChunkSource().getWorldChunk(cx, cz, false);
+                    : currentWorld.getChunkSource().getChunk(cx, cz, false);
             if (liveChunk != null) {
                 iterator.remove();
                 continue;
@@ -817,10 +815,10 @@ public class ChunkManager {
 
     /**
      * Re-flags sections whose captures were sacrificed under backpressure so
-     * vanilla rebuilds them and the capture path runs again.
+     * Embeddium rebuilds them and the capture path runs again.
      */
     private void reflagEvictedSections() {
-        evictedSectionScratch.clearAllBlockEntities();
+        evictedSectionScratch.clear();
         BlockDataQueue.drainEvictedSections(evictedSectionScratch, MAX_EVICTED_REFLAGS_PER_FRAME);
         if (evictedSectionScratch.isEmpty()) return;
 
@@ -833,7 +831,7 @@ public class ChunkManager {
     }
 
     private void drainSectionRemovals(long deadline) {
-        deferredSectionRemovals.clearAllBlockEntities();
+        deferredSectionRemovals.clear();
         int removed = 0;
         int examined = 0;
         try {
@@ -859,7 +857,7 @@ public class ChunkManager {
             for (SectionLeftRenderSetQueue.SectionCoord section : deferredSectionRemovals) {
                 SectionLeftRenderSetQueue.enqueueEmptyCandidate(section);
             }
-            deferredSectionRemovals.clearAllBlockEntities();
+            deferredSectionRemovals.clear();
         }
     }
 
@@ -868,16 +866,29 @@ public class ChunkManager {
             return false;
         }
 
-        LevelChunk wc = currentWorld.getChunkSource().getWorldChunk(cx, cz, false);
-        return wc != null && wc.isSectionEmpty(sy);
+        LevelChunk wc = currentWorld.getChunkSource().getChunk(cx, cz, false);
+        return wc != null && isSectionEmpty(wc, sy);
+    }
+
+    /**
+     * Whether section {@code sy} of {@code chunk} holds only air: 1.21's
+     * {@code ChunkAccess.isSectionEmpty}, which 1.20.1 lacks. A section outside the
+     * world's height holds nothing.
+     */
+    private static boolean isSectionEmpty(LevelChunk chunk, int sy) {
+        int index = chunk.getSectionIndexFromSectionY(sy);
+        if (index < 0 || index >= chunk.getSectionsCount()) {
+            return true;
+        }
+        return chunk.getSection(index).hasOnlyAir();
     }
 
     private int drainBlockData() {
         if (pendingCaptureIndex >= pending.size()) {
-            pending.clearAllBlockEntities();
+            pending.clear();
             pendingCaptureIndex = 0;
             // Geometry never waits on light bookkeeping: a full capture queue
-            // blocks vanilla's shared chunk workers, so pinning this drain on
+            // blocks Embeddium's chunk builder workers, so pinning this drain on
             // light backpressure freezes the whole build pipeline. Light work
             // stays paced by its own per-frame budget and merely lags.
             BlockDataQueue.drain(pending);
@@ -902,7 +913,7 @@ public class ChunkManager {
             long chunkKey = packChunkKey(cx, cz);
             LevelChunk liveChunk = null;
             if (currentWorld != null) {
-                liveChunk = currentWorld.getChunkSource().getWorldChunk(cx, cz, false);
+                liveChunk = currentWorld.getChunkSource().getChunk(cx, cz, false);
             }
             if (liveChunk == null) {
                 skipped++;
@@ -913,6 +924,17 @@ public class ChunkManager {
                 // A live capture supersedes an unload event that was deferred
                 // while native mesh retirement was backpressured.
                 LOGGER.debug("Cancelled deferred unload for reloaded chunk ({},{})", cx, cz);
+            }
+            if (isSectionEmpty(liveChunk, sy)) {
+                // The section emptied after this capture began. Embeddium settles an
+                // all-air section without a meshing task, so no later capture would
+                // replace this one, and Embeddium's own ordering (it keeps only a
+                // section's newest output) never reaches this queue. Drop it, and
+                // remove whatever Remix still holds there.
+                skipped++;
+                releaseMeshData(cap);
+                onSectionSettledEmpty(cx, sy, cz);
+                continue;
             }
 
             int hash = hashCapture(cap);
@@ -941,12 +963,12 @@ public class ChunkManager {
         }
 
         if (pendingCaptureIndex >= pending.size()) {
-            pending.clearAllBlockEntities();
+            pending.clear();
             pendingCaptureIndex = 0;
         }
 
         if (skipped > 0 && LOGGER.isDebugEnabled()) {
-            LOGGER.debug("Skipped {} stale BlockDataQueue entries for unloaded chunks", skipped);
+            LOGGER.debug("Skipped {} stale BlockDataQueue entries (unloaded chunks or emptied sections)", skipped);
         }
         return processed;
     }
@@ -1059,7 +1081,7 @@ public class ChunkManager {
             retirementQueue.retire(page.instance);
         }
         retainedPageCount -= state.activePages.size();
-        state.activePages.clearAllBlockEntities();
+        state.activePages.clear();
         state.dirtyMask = 0;
         state.generation++;
     }
@@ -1068,8 +1090,8 @@ public class ChunkManager {
         for (LightWorkItem task : lightWorkQueue) {
             task.destroyRemainingOnClear();
         }
-        lightWorkQueue.clearAllBlockEntities();
-        activeLightTasks.clearAllBlockEntities();
+        lightWorkQueue.clear();
+        activeLightTasks.clear();
         pendingLightOps = 0;
         lightWorkBackpressured = false;
         lastLightFailureLogNanos = 0;
@@ -1161,7 +1183,7 @@ public class ChunkManager {
      */
     private static int lightFingerprint(LightEntry le) {
         return Objects.hash(
-                BuiltInRegistries.BLOCK.getRawId(le.block()),
+                BuiltInRegistries.BLOCK.getId(le.block()),
                 le.key().ruleId(),
                 le.key().lightIndex(),
                 le.lightLevel(),
@@ -1213,7 +1235,7 @@ public class ChunkManager {
     }
 
     private void submitDirtyBuilds(BlockTextureManager textures, int playerCx, int playerCz) {
-        dirtyBuildScratch.clearAllBlockEntities();
+        dirtyBuildScratch.clear();
         for (ColumnRenderState state : renderColumns.values()) {
             boolean streamSettled = terrainFrame >= state.settleUntilFrame;
             boolean maxWaitElapsed = state.dirtySinceFrame != Long.MIN_VALUE
@@ -1281,7 +1303,7 @@ public class ChunkManager {
             clearDirtyTimingIfClean(state);
             state.buildInFlight = true;
             pendingResults.incrementAndGet();
-            pendingMeshBytes.addOrGet(estimatedBytes);
+            pendingMeshBytes.addAndGet(estimatedBytes);
             try {
                 readyQueue.add(result);
                 meshBuildExecutor.execute(() -> {
@@ -1291,7 +1313,7 @@ public class ChunkManager {
                         long actualBytes = estimatePageBytes(result.pages);
                         long reservedBytes = result.accountedBytes;
                         result.accountedBytes = actualBytes;
-                        pendingMeshBytes.addOrGet(actualBytes - reservedBytes);
+                        pendingMeshBytes.addAndGet(actualBytes - reservedBytes);
                     } catch (Throwable failure) {
                         disposePages(result.pages);
                         result.pages = null;
@@ -1307,11 +1329,11 @@ public class ChunkManager {
                 state.buildInFlight = false;
                 markBuildRetry(state, submittedMask);
                 pendingResults.decrementAndGet();
-                pendingMeshBytes.addOrGet(-estimatedBytes);
+                pendingMeshBytes.addAndGet(-estimatedBytes);
                 throw failure;
             }
         }
-        dirtyBuildScratch.clearAllBlockEntities();
+        dirtyBuildScratch.clear();
     }
 
     private void installReadyMeshes(RemixAPI api) {
@@ -1329,14 +1351,14 @@ public class ChunkManager {
                 pendingResults.decrementAndGet();
 
                 if (result.failure() != null) {
-                    pendingMeshBytes.addOrGet(-result.accountedBytes());
+                    pendingMeshBytes.addAndGet(-result.accountedBytes());
                     markForRebuildIfLive(result, true);
                     LOGGER.error("Background mesh build failed", result.failure());
                     continue;
                 }
                 if (isStale(result)) {
                     disposePages(result.pages());
-                    pendingMeshBytes.addOrGet(-result.accountedBytes());
+                    pendingMeshBytes.addAndGet(-result.accountedBytes());
                     markForRebuildIfLive(result, false);
                     continue;
                 }
@@ -1530,7 +1552,7 @@ public class ChunkManager {
         }
         owner.hasPublishedState = true;
         owner.buildInFlight = false;
-        pendingMeshBytes.addOrGet(-result.accountedBytes());
+        pendingMeshBytes.addAndGet(-result.accountedBytes());
     }
 
     private void abortInstall(MeshInstallCursor cursor) {
@@ -1539,7 +1561,7 @@ public class ChunkManager {
             destroyInstanceAndMesh(page.instance);
         }
         disposePages(result.pages());
-        pendingMeshBytes.addOrGet(-result.accountedBytes());
+        pendingMeshBytes.addAndGet(-result.accountedBytes());
         markForRebuildIfLive(result, cursor.failed || cursor.rollbackFailed);
     }
 
@@ -1834,7 +1856,7 @@ public class ChunkManager {
             examined++;
             int cx = (int) (key >> 32);
             int cz = (int) key;
-            LevelChunk chunk = currentWorld.getChunkSource().getWorldChunk(cx, cz, false);
+            LevelChunk chunk = currentWorld.getChunkSource().getChunk(cx, cz, false);
             if (chunk == null && terrain.findColumn(cx, cz) != null) {
                 // The column left without an unload event, so nothing has
                 // cancelled its light tasks yet.
@@ -1868,7 +1890,7 @@ public class ChunkManager {
             MeshBuildResult stale = pollCompletedBuild();
             if (stale != null) {
                 disposePages(stale.pages());
-                pendingMeshBytes.addOrGet(-stale.accountedBytes());
+                pendingMeshBytes.addAndGet(-stale.accountedBytes());
                 pendingResults.decrementAndGet();
             } else {
                 LockSupport.parkNanos(100_000L);
@@ -1880,26 +1902,26 @@ public class ChunkManager {
             for (InstalledMeshPage page : state.activePages) {
                 retirementQueue.retire(page.instance);
             }
-            state.activePages.clearAllBlockEntities();
+            state.activePages.clear();
         }
-        renderColumns.clearAllBlockEntities();
+        renderColumns.clear();
         retainedPageCount = 0;
         retainedInstancesHidden = false;
-        dirtyBuildScratch.clearAllBlockEntities();
+        dirtyBuildScratch.clear();
 
         enqueueLightRetirement(terrain.clearForRetirement());
         clearLightWork();
-        retirementQueue.clearAllBlockEntities();
+        retirementQueue.clear();
         currentWorld = null;
         for (int i = pendingCaptureIndex; i < pending.size(); i++) {
             releaseMeshData(pending.get(i).data());
         }
-        pending.clearAllBlockEntities();
+        pending.clear();
         pendingCaptureIndex = 0;
-        BlockDataQueue.clearAllBlockEntities();
-        SectionLeftRenderSetQueue.clearAllBlockEntities();
-        chunkUnloadEvents.clearAllBlockEntities();
-        pendingColumnUnloads.clearAllBlockEntities();
+        BlockDataQueue.clear();
+        SectionLeftRenderSetQueue.clear();
+        chunkUnloadEvents.clear();
+        pendingColumnUnloads.clear();
         framesSinceAudit = 0;
         terrainFrame = 0;
         zombieAuditColumns = null;
@@ -1908,7 +1930,7 @@ public class ChunkManager {
         lastTerrainDiagnostics = TerrainDiagnostics.EMPTY;
         // Recompute on the next frame rather than holding the cleared gauges.
         diagnosticsRefreshCountdown = 0;
-        LOGGER.printDebugLog("ChunkManager cleared");
+        LOGGER.info("ChunkManager cleared");
     }
 
     public void destroy() {
@@ -1932,13 +1954,13 @@ public class ChunkManager {
 
     private static int hashCapture(SectionBlockData cap) {
         int hash = cap.meshData().contentHash();
-        hash = 31 * hash + Long.hash(cap.topFaceMask());
-        hash = 31 * hash + Long.hash(cap.bottomFaceMask());
-        hash = 31 * hash + Long.hash(cap.eastFaceMask());
-        hash = 31 * hash + Long.hash(cap.westFaceMask());
-        hash = 31 * hash + Long.hash(cap.southFaceMask());
-        hash = 31 * hash + Long.hash(cap.northFaceMask());
-        return 31 * hash + Arrays.hash(cap.opacityBitmap());
+        hash = 31 * hash + Long.hashCode(cap.topFaceMask());
+        hash = 31 * hash + Long.hashCode(cap.bottomFaceMask());
+        hash = 31 * hash + Long.hashCode(cap.eastFaceMask());
+        hash = 31 * hash + Long.hashCode(cap.westFaceMask());
+        hash = 31 * hash + Long.hashCode(cap.southFaceMask());
+        hash = 31 * hash + Long.hashCode(cap.northFaceMask());
+        return 31 * hash + Arrays.hashCode(cap.opacityBitmap());
     }
 
 }

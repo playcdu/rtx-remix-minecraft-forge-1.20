@@ -12,6 +12,7 @@ import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.util.Mth;
 
 /**
  * Applies a render-only offset to the hidden local-player model so first-person
@@ -33,7 +34,7 @@ final class FirstPersonShadowModelPlacement {
 
     Vec3 resolve(ClientLevel world, Camera camera, Entity player,
                   List<LightConstraint> lights, float dtSeconds) {
-        Vec3 headCenter = camera.getPos();
+        Vec3 headCenter = camera.getPosition();
         Vec3 target = lights.isEmpty()
                 ? Vec3.ZERO
                 : chooseTargetOffset(world, camera, player, headCenter, lights, offset);
@@ -94,7 +95,7 @@ final class FirstPersonShadowModelPlacement {
         if (averageAway.lengthSqr() > DIRECTION_EPSILON_SQ) {
             addUniqueDirection(directions, averageAway.normalize());
         }
-        Vec3 backward = HeldLightPlacement.horizontalForward(camera.getYaw()).reverse();
+        Vec3 backward = HeldLightPlacement.horizontalForward(camera.getYRot()).reverse();
         addUniqueDirection(directions, backward);
 
         // A wall can block the preferred backward displacement without
@@ -121,7 +122,7 @@ final class FirstPersonShadowModelPlacement {
                                 requiredCenterDistance));
             }
 
-            Vec3 desired = direction.multiply(Math.min(requiredLength, MAX_MODEL_OFFSET));
+            Vec3 desired = direction.scale(Math.min(requiredLength, MAX_MODEL_OFFSET));
             candidates.add(clampToBlockCollisions(world, player, desired));
         }
         return selectContinuousCandidate(currentOffset, headCenter, lights, candidates);
@@ -139,7 +140,7 @@ final class FirstPersonShadowModelPlacement {
             }
         }
 
-        Vec3 selected = candidates.getFirst();
+        Vec3 selected = candidates.get(0);
         double selectedMotion = Double.POSITIVE_INFINITY;
         double totalHysteresis = TARGET_CLEARANCE_HYSTERESIS * lights.size();
         for (Vec3 candidate : candidates) {
@@ -174,14 +175,14 @@ final class FirstPersonShadowModelPlacement {
         double surfaceGap = displacedHeadCenter.distanceTo(light.position)
                 - HEAD_KEEP_OUT_RADIUS
                 - light.emitterRadius;
-        float normalized = (float) Math.clamp(surfaceGap / light.targetGap, 0.0, 1.0);
+        float normalized = (float) Mth.clamp(surfaceGap / light.targetGap, 0.0, 1.0);
         return normalized * normalized * (3.0f - 2.0f * normalized);
     }
 
     static SpringStep advanceSpring(
             Vec3 position, Vec3 velocity, Vec3 target,
             float dtSeconds, double angularFrequency) {
-        double dt = Math.clamp(
+        double dt = Mth.clamp(
                 dtSeconds, 0.0f, HeldLightPlacement.MAX_FRAME_DT_SECONDS);
         double omega = Math.max(0.0, angularFrequency);
         if (dt == 0.0 || omega == 0.0) {
@@ -190,9 +191,9 @@ final class FirstPersonShadowModelPlacement {
 
         double decay = Math.exp(-omega * dt);
         Vec3 displacement = position.subtract(target);
-        Vec3 temporary = velocity.add(displacement.multiply(omega)).multiply(dt);
-        Vec3 nextPosition = target.add(displacement.add(temporary).multiply(decay));
-        Vec3 nextVelocity = velocity.subtract(temporary.multiply(omega)).multiply(decay);
+        Vec3 temporary = velocity.add(displacement.scale(omega)).scale(dt);
+        Vec3 nextPosition = target.add(displacement.add(temporary).scale(decay));
+        Vec3 nextVelocity = velocity.subtract(temporary.scale(omega)).scale(decay);
         return new SpringStep(nextPosition, nextVelocity);
     }
 
@@ -203,7 +204,7 @@ final class FirstPersonShadowModelPlacement {
         }
 
         AABB modelBounds = player.getBoundingBox().deflate(COLLISION_EPSILON);
-        AABB desiredBounds = modelBounds.offset(desiredOffset);
+        AABB desiredBounds = modelBounds.move(desiredOffset);
         AABB queryBounds = new AABB(
                 Math.min(modelBounds.minX, desiredBounds.minX) - COLLISION_EPSILON,
                 Math.min(modelBounds.minY, desiredBounds.minY) - COLLISION_EPSILON,
@@ -220,12 +221,12 @@ final class FirstPersonShadowModelPlacement {
     static Vec3 slideAgainstBlocks(
             AABB modelBounds, Vec3 desiredOffset, List<AABB> nearbyBlocks) {
         double xFirstX = clampX(modelBounds, desiredOffset.x, nearbyBlocks);
-        AABB afterX = modelBounds.offset(xFirstX, 0.0, 0.0);
+        AABB afterX = modelBounds.move(xFirstX, 0.0, 0.0);
         double xFirstZ = clampZ(afterX, desiredOffset.z, nearbyBlocks);
         Vec3 xFirst = new Vec3(xFirstX, desiredOffset.y, xFirstZ);
 
         double zFirstZ = clampZ(modelBounds, desiredOffset.z, nearbyBlocks);
-        AABB afterZ = modelBounds.offset(0.0, 0.0, zFirstZ);
+        AABB afterZ = modelBounds.move(0.0, 0.0, zFirstZ);
         double zFirstX = clampX(afterZ, desiredOffset.x, nearbyBlocks);
         Vec3 zFirst = new Vec3(zFirstX, desiredOffset.y, zFirstZ);
 

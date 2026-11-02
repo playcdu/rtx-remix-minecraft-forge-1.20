@@ -4,21 +4,20 @@
  */
 package com.nvidia.rtxremix.minecraft.mixin;
 
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.mojang.blaze3d.vertex.PoseStack;
 import com.nvidia.rtxremix.minecraft.RemixRenderer;
 import com.nvidia.rtxremix.minecraft.RtxRemixMod;
 import com.nvidia.rtxremix.minecraft.profiling.ProfileScope;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.Camera;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.GameRenderer;
-import net.minecraft.client.render.RenderTickCounter; // PORT: no 1.20.1 equivalent
-import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.ItemInHandRenderer;
-import com.mojang.blaze3d.vertex.PoseStack;
-import org.joml.Matrix4f;
+import net.minecraft.client.renderer.MultiBufferSource;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
@@ -26,15 +25,20 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * own ItemInHandRenderer animation and selection logic, brackets the GUI tail
  * of its render method with a profiling scope, and has input capture follow
  * the Remix menus at the start of each frame.
+ *
+ * <p>The hand draw is wrapped rather than redirected so that other mods that
+ * redirect or wrap {@code renderHandsWithItems} still apply; when Remix takes
+ * the frame, the wrapped call (theirs included) is replaced by the capture,
+ * exactly as vanilla's call is.
  */
 @Mixin(GameRenderer.class)
 public abstract class GameRendererMixin {
 
-    @Redirect(
+    @WrapOperation(
             method = "renderItemInHand",
             at = @At(
                     value = "INVOKE",
-                    target = "Lnet/minecraft/client/renderer/ItemInHandRenderer;renderItem(FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource$BufferSource;Lnet/minecraft/client/player/LocalPlayer;I)V"
+                    target = "Lnet/minecraft/client/renderer/ItemInHandRenderer;renderHandsWithItems(FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource$BufferSource;Lnet/minecraft/client/player/LocalPlayer;I)V"
             ))
     private void rtxremix$captureFirstPersonModel(
             ItemInHandRenderer heldItemRenderer,
@@ -42,10 +46,11 @@ public abstract class GameRendererMixin {
             PoseStack matrices,
             MultiBufferSource.BufferSource vertexConsumers,
             LocalPlayer player,
-            int light) {
+            int light,
+            Operation<Void> original) {
         RemixRenderer renderer = RtxRemixMod.renderer;
         if (!RtxRemixMod.shouldCaptureFirstPersonModel()) {
-            heldItemRenderer.renderItem(tickDelta, matrices, vertexConsumers, player, light);
+            original.call(heldItemRenderer, tickDelta, matrices, vertexConsumers, player, light);
             return;
         }
 
@@ -60,28 +65,30 @@ public abstract class GameRendererMixin {
                     shift = At.Shift.BEFORE
             ))
     private void rtxremix$submitBeforeScreenOverlays(
+            PoseStack matrices,
             Camera camera,
             float tickDelta,
-            Matrix4f positionMatrix,
             CallbackInfo ci) {
         RtxRemixMod.submitRemixFrameIfReady();
     }
 
     /**
      * Covers third person, sleeping, hidden-hand, panorama, and other paths
-     * where ItemInHandRenderer or InGameOverlayRenderer is skipped.
+     * where ItemInHandRenderer or ScreenEffectRenderer is skipped.
      */
     @Inject(method = "renderLevel", at = @At("TAIL"))
     private void rtxremix$submitAtRenderWorldTail(
-            RenderTickCounter tickCounter,
+            float partialTick,
+            long finishTimeNano,
+            PoseStack matrices,
             CallbackInfo ci) {
         RtxRemixMod.submitRemixFrameIfReady();
     }
 
     /**
-     * The GUI tail of GameRenderer.render, from vanilla's {@code swap("gui")} to
+     * The GUI tail of GameRenderer.render, from vanilla's {@code popPush("gui")} to
      * the method's return: HUD, in-game screen or overlay, toasts, and the final
-     * DrawContext flush. Vanilla only reaches that swap while a world is loaded,
+     * GuiGraphics flush. Vanilla only reaches that popPush while a level is loaded,
      * so menu-only frames have no GUI zone. WorldRender.END accounts for the
      * world half of the frame.
      */
@@ -94,8 +101,9 @@ public abstract class GameRendererMixin {
                     target = "Lnet/minecraft/util/profiling/ProfilerFiller;popPush(Ljava/lang/String;)V"
             ))
     private void rtxremix$beginGuiScope(
-            RenderTickCounter tickCounter,
-            boolean tick,
+            float partialTick,
+            long nanoTime,
+            boolean renderLevel,
             CallbackInfo ci) {
         rtxremix$closeGuiScope();
         if (ProfileScope.isJavaScopeEnabled()) {
@@ -107,16 +115,18 @@ public abstract class GameRendererMixin {
     /** Before any screen draws, so the frame's hover state already matches input capture. */
     @Inject(method = "render", at = @At("HEAD"))
     private void rtxremix$followRemixMenuVisibility(
-            RenderTickCounter tickCounter,
-            boolean tick,
+            float partialTick,
+            long nanoTime,
+            boolean renderLevel,
             CallbackInfo ci) {
         RtxRemixMod.followRemixMenuVisibility();
     }
 
     @Inject(method = "render", at = @At("RETURN"))
     private void rtxremix$endGuiScope(
-            RenderTickCounter tickCounter,
-            boolean tick,
+            float partialTick,
+            long nanoTime,
+            boolean renderLevel,
             CallbackInfo ci) {
         rtxremix$closeGuiScope();
     }

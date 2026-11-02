@@ -7,24 +7,28 @@ package com.nvidia.rtxremix.minecraft.settings;
 import com.nvidia.rtxremix.minecraft.input.RemixInputGate;
 import com.nvidia.rtxremix.minecraft.texture.BlockTextureManager;
 import com.nvidia.rtxremix.minecraft.RtxRemixMod;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.StringWidget;
+import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.layouts.GridLayout;
+import net.minecraft.client.gui.layouts.HeaderAndFooterLayout;
 import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.components.Tooltip;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.widget.DirectionalLayoutWidget; // PORT: no 1.20.1 equivalent
-import net.minecraft.client.gui.layouts.LayoutSettings;
-import net.minecraft.client.gui.components.StringWidget;
-import net.minecraft.client.gui.layouts.HeaderAndFooterLayout;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 
 /** Landing page for the categorized RTX Remix settings. */
 public final class RtxSettingsScreen extends Screen {
 
+    private static final int HEADER_HEIGHT = 33;
+    private static final int FOOTER_HEIGHT = 33;
+    private static final int SPACING = 8;
+
     private final Screen parent;
     private final RtxSettings settings;
     private final Runnable saveSettings;
-    private final HeaderAndFooterLayout layout = new HeaderAndFooterLayout(this, 33, 33);
+    private HeaderAndFooterLayout layout;
 
     public RtxSettingsScreen(Screen parent, RtxSettings settings, Runnable saveSettings) {
         super(Component.translatable("rtxremix.settings.title"));
@@ -35,38 +39,41 @@ public final class RtxSettingsScreen extends Screen {
 
     @Override
     protected void init() {
-        DirectionalLayoutWidget header =
-                this.layout.addHeader(DirectionalLayoutWidget.vertical());
-        header.add(new StringWidget(this.title, this.font), LayoutSettings::alignHorizontallyCenter);
+        this.layout = new HeaderAndFooterLayout(this, HEADER_HEIGHT, FOOTER_HEIGHT);
+        this.layout.addToHeader(new StringWidget(this.title, this.font));
 
-        DirectionalLayoutWidget categories = DirectionalLayoutWidget.vertical().spacing(8);
+        GridLayout categories = new GridLayout().rowSpacing(SPACING);
+        GridLayout.RowHelper categoryRows = categories.createRowHelper(1);
         for (SettingCategory category : SettingCategory.values()) {
             if (settings.category(category).isEmpty()) {
                 continue;
             }
-            categories.add(Button.builder(
+            categoryRows.addChild(Button.builder(
                             Component.translatable(category.labelKey()),
-                            button -> this.client.setScreen(new RtxSettingsCategoryScreen(
+                            button -> this.minecraft.setScreen(new RtxSettingsCategoryScreen(
                                     this, settings, saveSettings, category)))
                     .width(204)
                     .build());
         }
         // Set apart from the categories because it leaves Minecraft's screens
         // for Remix's own menu rather than opening another page.
-        categories.add(openRemixMenuButton(), positioner -> positioner.paddingTop(8));
+        categoryRows.addChild(
+                openRemixMenuButton(), categoryRows.newCellSettings().paddingTop(SPACING));
         this.layout.addToContents(categories);
 
-        DirectionalLayoutWidget footer = DirectionalLayoutWidget.horizontal().spacing(8);
-        footer.add(Button.builder(
+        GridLayout footer = new GridLayout().columnSpacing(SPACING);
+        GridLayout.RowHelper footerRow = footer.createRowHelper(2);
+        footerRow.addChild(Button.builder(
                         Component.translatable("rtxremix.settings.resetAll"), button -> confirmReset())
                 .tooltip(Tooltip.create(Component.translatable("rtxremix.settings.resetAll.tip")))
                 .width(98)
                 .build());
-        footer.add(Button.builder(CommonComponents.DONE, button -> close()).width(98).build());
+        footerRow.addChild(
+                Button.builder(CommonComponents.GUI_DONE, button -> onClose()).width(98).build());
         this.layout.addToFooter(footer);
 
-        this.layout.forEachChild(this::addRenderableWidget);
-        this.repositionElements();
+        this.layout.visitWidgets(this::addRenderableWidget);
+        repositionElements();
     }
 
     private Button openRemixMenuButton() {
@@ -74,31 +81,35 @@ public final class RtxSettingsScreen extends Screen {
                         Component.translatable("rtxremix.settings.openRemixMenu"),
                         // Queued so the click that pressed this button finishes
                         // dispatching before opening releases that same press.
-                        button -> this.client.send(() -> RtxRemixMod.openRemixMenu(
+                        button -> this.minecraft.tell(() -> RtxRemixMod.openRemixMenu(
                                 RemixInputGate.Menu.GRAPHICS_SETTINGS)))
                 .tooltip(Tooltip.create(Component.translatable("rtxremix.settings.openRemixMenu.tip")))
                 .width(204)
                 .build();
     }
 
+    /** A resize only repositions the page, as 1.21.1's tab navigation refresh did. */
     @Override
     protected void repositionElements() {
         this.layout.arrangeElements();
     }
 
+    @Override
+    public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
+        renderBackground(context);
+        super.render(context, mouseX, mouseY, delta);
+    }
+
     /**
      * Resets every setting, then reopens this page as a new screen instance.
      *
-     * <p>A refreshed page must be a fresh screen, never {@code clearAndInit()}
-     * on this one. The {@code layout} field is built once, in its initializer,
-     * and is never cleared, so re-running {@code init()} appends a second
-     * header, body, and footer to the same layout. The same rule holds for the
-     * category and block-light pages, where the stacking is visible: their
-     * option lists draw a translucent background, so every refresh would add
-     * another dark layer over a duplicated set of widgets.
+     * <p>A refreshed page is a fresh screen, never a rebuild of this one, so
+     * every widget, here and on the category and block-light pages, is built
+     * again from the reset values rather than carrying a stale value or a
+     * pending slider position across the reset.
      */
     private void confirmReset() {
-        this.client.setScreen(new ConfirmScreen(confirmed -> {
+        this.minecraft.setScreen(new ConfirmScreen(confirmed -> {
             if (confirmed) {
                 boolean rebuildBlockLights =
                         settings.hasOverrides(SettingGroup.BLOCK_LIGHTS);
@@ -115,7 +126,7 @@ public final class RtxSettingsScreen extends Screen {
                     RtxRemixMod.rebuildLoadedTerrain();
                 }
             }
-            this.client.setScreen(new RtxSettingsScreen(parent, settings, saveSettings));
+            this.minecraft.setScreen(new RtxSettingsScreen(parent, settings, saveSettings));
         }, Component.translatable("rtxremix.settings.resetAll.confirm.title"),
                 Component.translatable("rtxremix.settings.resetAll.confirm.message")));
     }
@@ -125,6 +136,6 @@ public final class RtxSettingsScreen extends Screen {
         if (saveSettings != null) {
             saveSettings.run();
         }
-        this.client.setScreen(this.parent);
+        this.minecraft.setScreen(this.parent);
     }
 }

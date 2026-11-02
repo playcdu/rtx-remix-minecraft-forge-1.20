@@ -24,13 +24,19 @@ import java.util.WeakHashMap;
  *
  * <p>Textures are captured via two mixin paths:
  * <ul>
- *   <li>{@code NativeImageBackedTextureMixin}, for {@code DynamicTexture}
- *       instances (capes, etc.)</li>
- *   <li>{@code PlayerSkinTextureMixin}, for {@code PlayerSkinTexture} instances
+ *   <li>{@code NativeImageBackedTextureMixin} and {@code NativeImageUploadMixin}, for
+ *       {@code DynamicTexture} instances (capes, maps, etc.): the texture's image is
+ *       tagged as an {@link UploadSource} and every GL upload from it, whole or a
+ *       sub-rectangle, is copied into the snapshot.</li>
+ *   <li>{@code PlayerSkinTextureMixin}, for {@code HttpTexture} instances
  *       (player skins downloaded from Mojang CDN)</li>
  * </ul>
  *
- * <p>In both cases, {@code TextureManagerMixin} intercepts {@code registerTexture()}
+ * <p>Sub-rectangle uploads matter on Forge: ImmediatelyFast's map atlas generation packs
+ * every map into a shared 4096-pixel {@code DynamicTexture} and uploads each changed map
+ * as a 128-pixel window of the atlas image, never through {@code DynamicTexture.upload}.
+ *
+ * <p>In both cases, {@code TextureManagerMixin} intercepts {@code register()}
  * to record the texture-to-identifier mapping in {@link #TEXTURE_IDS}, and the type-specific
  * mixin captures pixel data at upload time via {@link #captureFromUpload}.
  *
@@ -79,6 +85,15 @@ public final class DynamicTextureCache {
             Collections.synchronizedMap(new WeakHashMap<>());
     private static long nextVersion = 1L;
 
+    /**
+     * Implemented on {@code NativeImage} by {@code NativeImageUploadMixin}: the tracked
+     * texture an image backs, so its uploads can be mirrored with one field read.
+     */
+    public interface UploadSource {
+        ResourceLocation rtxremix$uploadTarget();
+        void rtxremix$setUploadTarget(ResourceLocation id);
+    }
+
     // ---- Called from TextureManagerMixin ----
 
     /**
@@ -89,13 +104,16 @@ public final class DynamicTextureCache {
      */
     public static void onRegisterTexture(ResourceLocation id, AbstractTexture texture, NativeImage imageOrNull) {
         TEXTURE_IDS.put(texture, id);
-        if (imageOrNull != null) {
+        if (imageOrNull != null && isCapturable(imageOrNull)) {
             // Image available now (e.g. cape textures, non-async paths).
             store(id, extractPixels(imageOrNull));
+            if (texture instanceof DynamicTexture) {
+                tagUploadSource(imageOrNull, id);
+            }
         }
     }
 
-    /** Registers the mirror of a glyph page under the id {@code FontStorage} gave it. */
+    /** Registers the mirror of a glyph page under the id {@code FontSet} gave it. */
     public static void onRegisterGlyphPage(ResourceLocation id, GlyphPageMirror page) {
         GLYPH_PAGES.put(id, page);
     }
@@ -110,9 +128,80 @@ public final class DynamicTextureCache {
      */
     public static boolean captureFromUpload(AbstractTexture texture, NativeImage image) {
         ResourceLocation id = TEXTURE_IDS.get(texture);
-        if (id == null) return false;
+        if (id == null || !isCapturable(image)) return false;
         store(id, extractPixels(image));
         return true;
+    }
+
+    /**
+     * Marks {@code image} as the source of a tracked {@code DynamicTexture}'s uploads, so
+     * {@link #captureUploadedRegion} follows it. Called from
+     * {@code NativeImageBackedTextureMixin} before every whole-texture upload, which also
+     * picks up an image swapped in by {@code setPixels}; does nothing for an untracked texture.
+     */
+    public static void trackUploadSource(AbstractTexture texture, NativeImage image) {
+        ResourceLocation id = TEXTURE_IDS.get(texture);
+        if (id != null) {
+            tagUploadSource(image, id);
+        }
+    }
+
+    /**
+     * Mirrors one level-0 GL upload from a tagged image into the snapshot: the window at
+     * ({@code srcX}, {@code srcY}) of the image lands at ({@code dstX}, {@code dstY}), as
+     * {@code glTexSubImage2D} writes it. Without a snapshot of the image's size the whole
+     * image is snapshotted instead, which is also what a whole-texture upload amounts to.
+     * Called from {@code NativeImageUploadMixin} on the render thread.
+     */
+    public static void captureUploadedRegion(NativeImage image, ResourceLocation id,
+                                             int dstX, int dstY, int srcX, int srcY,
+                                             int width, int height) {
+        if (!isCapturable(image)) {
+            return;
+        }
+        int imageWidth = image.getWidth();
+        int imageHeight = image.getHeight();
+        Pixels snapshot = CACHE.get(id);
+        boolean wholeImage = dstX == 0 && dstY == 0 && srcX == 0 && srcY == 0
+                && width == imageWidth && height == imageHeight;
+        if (wholeImage || snapshot == null
+                || snapshot.width() != imageWidth || snapshot.height() != imageHeight) {
+            store(id, extractPixels(image));
+            return;
+        }
+        int columns = Math.min(width, Math.min(imageWidth - srcX, imageWidth - dstX));
+        int rows = Math.min(height, Math.min(imageHeight - srcY, imageHeight - dstY));
+        if (srcX < 0 || srcY < 0 || dstX < 0 || dstY < 0 || columns <= 0 || rows <= 0) {
+            return;
+        }
+        // In place: every reader copies the array when the version moves, on this thread.
+        byte[] out = snapshot.data();
+        for (int row = 0; row < rows; row++) {
+            int idx = ((dstY + row) * imageWidth + dstX) * 4;
+            for (int column = 0; column < columns; column++, idx += 4) {
+                int abgr = image.getPixelRGBA(srcX + column, srcY + row);
+                out[idx]     = (byte)  (abgr         & 0xFF);
+                out[idx + 1] = (byte) ((abgr >>  8)  & 0xFF);
+                out[idx + 2] = (byte) ((abgr >> 16)  & 0xFF);
+                out[idx + 3] = (byte) ((abgr >> 24)  & 0xFF);
+            }
+        }
+        store(id, new Pixels(out, imageWidth, imageHeight, allocateVersion()));
+    }
+
+    /**
+     * Only RGBA images are snapshotted: {@code getPixelRGBA} throws for any other format,
+     * and a throw here would escape into the texture manager's registration.
+     */
+    private static boolean isCapturable(NativeImage image) {
+        return image.format() == NativeImage.Format.RGBA;
+    }
+
+    private static void tagUploadSource(NativeImage image, ResourceLocation id) {
+        // NativeImage is final, so the mixin-added interface is only visible through Object.
+        if ((Object) image instanceof UploadSource source) {
+            source.rtxremix$setUploadTarget(id);
+        }
     }
 
     /** The number of snapshots above which released textures are pruned. */
@@ -131,8 +220,7 @@ public final class DynamicTextureCache {
         GlyphPageMirror page = GLYPH_PAGES.get(id);
         return page == null
                 ? null
-                : new Pixels(page.data(), GlyphPageMirror.PAGE_SIZE, GlyphPageMirror.PAGE_SIZE,
-                        page.version());
+                : new Pixels(page.data(), page.width(), page.height(), page.version());
     }
 
     public static boolean isGlyphPage(ResourceLocation id) {

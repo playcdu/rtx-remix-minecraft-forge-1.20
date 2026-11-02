@@ -15,8 +15,18 @@ import net.minecraft.ChatFormatting;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Function;
+import net.minecraft.Util;
+import net.minecraft.client.Options;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractOptionSliderButton;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.util.Mth;
+import java.util.Objects;
+import java.util.function.Consumer;
+import java.util.function.IntFunction;
+import java.util.function.ToIntFunction;
 
-/** Converts an RtxSetting into a vanilla OptionInstance for OptionListWidget. */
+/** Converts an RtxSetting into a vanilla OptionInstance for {@link RtxOptionsList}. */
 final class RtxOptionFactory {
 
     static final String ENTITY_DISTANCE_ID = "dist.entity";
@@ -62,18 +72,20 @@ final class RtxOptionFactory {
                 int sentinelSliderValue = sentinelSliderValue(s.id());
                 int sliderMin = sentinelSliderValue > 0 ? 1 : (int) s.min() / s.step();
                 int sliderMax = sentinelSliderValue > 0 ? sentinelSliderValue : (int) s.max() / s.step();
+                OptionInstance.CaptionBasedToString<Integer> text =
+                        (optionText, value) -> optionText.copy()
+                                .append(": ").append(intValueText(s.id(), value));
                 var callbacks =
                         sliderApplyPolicy(
-                                new OptionInstance.IntRange(
-                                        sliderMin, sliderMax, true).xmap(
-                                                value -> intValueFromSlider(s, value),
-                                                value -> sliderValueFromInt(s, value)),
-                                s.applySliderValueImmediately());
+                                new IntSliderValues(sliderMin, sliderMax).withModifier(
+                                        value -> intValueFromSlider(s, value),
+                                        value -> sliderValueFromInt(s, value)),
+                                s.applySliderValueImmediately(),
+                                pendingText(setting.labelKey(), text));
                 return new OptionInstance<>(
                         setting.labelKey(),
                         v -> tooltip(s, v),
-                        (optionText, value) -> optionText.copy()
-                                .append(": ").append(intValueText(s.id(), value)),
+                        text,
                         callbacks,
                         s.get(),
                         s::apply);
@@ -82,6 +94,9 @@ final class RtxOptionFactory {
                 RtxSetting<Double> s = (RtxSetting<Double>) setting;
                 double min = s.min();
                 double max = s.max();
+                OptionInstance.CaptionBasedToString<Double> text =
+                        (optionText, value) -> optionText.copy()
+                                .append(": ").append(floatValueText(s.id(), value));
                 var callbacks =
                         sliderApplyPolicy(
                                 OptionInstance.UnitDouble.INSTANCE.xmap(
@@ -89,12 +104,12 @@ final class RtxOptionFactory {
                                                 s.id(), progress, min, max),
                                         value -> sliderValueFromFloat(
                                                 s.id(), value, min, max)),
-                                s.applySliderValueImmediately());
+                                s.applySliderValueImmediately(),
+                                pendingText(setting.labelKey(), text));
                 return new OptionInstance<>(
                         setting.labelKey(),
                         v -> tooltip(s, v),
-                        (optionText, value) -> optionText.copy()
-                                .append(": ").append(floatValueText(s.id(), value)),
+                        text,
                         callbacks,
                         s.get(),
                         s::apply);
@@ -117,24 +132,48 @@ final class RtxOptionFactory {
         return (optionText, value) -> valueText.apply(value);
     }
 
+    /**
+     * The slider message for a value that may not be applied yet. 1.20.1's
+     * {@code OptionInstance} keeps its own caption formatter private, so the
+     * deferred slider is handed the same formatter the option was built with.
+     */
+    private static <T> Function<T, Component> pendingText(
+            String labelKey, OptionInstance.CaptionBasedToString<T> text) {
+        Component caption = Component.translatable(labelKey);
+        return value -> text.toString(caption, value);
+    }
+
+    /**
+     * Wraps {@code callbacks} in a value set whose slider follows 1.21.1's
+     * {@code SliderCallbacks.applyValueImmediately()} policy. An immediate
+     * slider applies every step. A deferred one applies its pending value once
+     * the slider has settled for {@link OptionSlider#SETTLE_MILLIS}, or when
+     * the screen commits its pending values
+     * ({@link RtxOptionsList#applyAllPendingValues()}), so an expensive
+     * applier runs once per adjustment rather than once per slider step.
+     *
+     * <p>1.20.1's own option slider has no deferred mode, and it also saves
+     * vanilla's {@code options.txt} on every step, which is why both modes use
+     * {@link OptionSlider}; the options screen saves vanilla options once, when
+     * it is removed.
+     */
     static <T> OptionInstance.SliderableValueSet<T> sliderApplyPolicy(
-            OptionInstance.SliderableValueSet<T> callbacks, boolean applyImmediately) {
-        if (applyImmediately) {
-            return callbacks;
-        }
+            OptionInstance.SliderableValueSet<T> callbacks,
+            boolean applyImmediately,
+            Function<T, Component> pendingText) {
         return new OptionInstance.SliderableValueSet<>() {
             @Override
-            public double toSliderProgress(T value) {
+            public double toSliderValue(T value) {
                 return callbacks.toSliderValue(value);
             }
 
             @Override
-            public T toValue(double sliderProgress) {
+            public T fromSliderValue(double sliderProgress) {
                 return callbacks.fromSliderValue(sliderProgress);
             }
 
             @Override
-            public Optional<T> validate(T value) {
+            public Optional<T> validateValue(T value) {
                 return callbacks.validateValue(value);
             }
 
@@ -144,10 +183,159 @@ final class RtxOptionFactory {
             }
 
             @Override
-            public boolean applyValueImmediately() {
-                return false;
+            public Function<OptionInstance<T>, AbstractWidget> createButton(
+                    OptionInstance.TooltipSupplier<T> tooltip,
+                    Options options,
+                    int x,
+                    int y,
+                    int width,
+                    Consumer<T> onValueChanged) {
+                return instance -> new OptionSlider<>(
+                        options, x, y, width, 20, instance, this, tooltip,
+                        pendingText, onValueChanged, applyImmediately);
             }
         };
+    }
+
+    /**
+     * 1.21.1's integer slider mapping. 1.20.1's {@code OptionInstance.IntRange}
+     * reaches its maximum only at the slider's last pixel, which would hide the
+     * Auto sentinel at the right edge of the distance sliders; this mapping
+     * gives every value, the ends included, an equal share of the track.
+     */
+    record IntSliderValues(int minInclusive, int maxInclusive)
+            implements OptionInstance.SliderableValueSet<Integer> {
+
+        @Override
+        public Optional<Integer> validateValue(Integer value) {
+            return value >= minInclusive && value <= maxInclusive
+                    ? Optional.of(value)
+                    : Optional.empty();
+        }
+
+        @Override
+        public Codec<Integer> codec() {
+            return Codec.intRange(minInclusive, maxInclusive + 1);
+        }
+
+        @Override
+        public double toSliderValue(Integer value) {
+            if (value == minInclusive) {
+                return 0.0;
+            }
+            return value == maxInclusive
+                    ? 1.0
+                    : Mth.map(value + 0.5, minInclusive, maxInclusive + 1.0, 0.0, 1.0);
+        }
+
+        @Override
+        public Integer fromSliderValue(double sliderProgress) {
+            double progress = sliderProgress >= 1.0 ? 0.99999f : sliderProgress;
+            return Mth.floor(Mth.map(progress, 0.0, 1.0, minInclusive, maxInclusive + 1.0));
+        }
+
+        /** 1.21.1's {@code IntSliderCallbacks.withModifier}. */
+        <R> OptionInstance.SliderableValueSet<R> withModifier(
+                IntFunction<? extends R> sliderToValue, ToIntFunction<? super R> valueToSlider) {
+            IntSliderValues range = this;
+            return new OptionInstance.SliderableValueSet<>() {
+                @Override
+                public Optional<R> validateValue(R value) {
+                    return range.validateValue(valueToSlider.applyAsInt(value))
+                            .map(sliderToValue::apply);
+                }
+
+                @Override
+                public double toSliderValue(R value) {
+                    return range.toSliderValue(valueToSlider.applyAsInt(value));
+                }
+
+                @Override
+                public R fromSliderValue(double sliderProgress) {
+                    return sliderToValue.apply(range.fromSliderValue(sliderProgress));
+                }
+
+                @Override
+                public Codec<R> codec() {
+                    return range.codec().xmap(sliderToValue::apply, valueToSlider::applyAsInt);
+                }
+            };
+        }
+    }
+
+    /**
+     * 1.21.1's option slider. The label and tooltip follow the slider's value.
+     * An immediate slider applies each step to the option, and through it to
+     * the setting's applier. A deferred one applies only after the slider has
+     * rested for {@link #SETTLE_MILLIS}, or when {@link #applyPendingValue()}
+     * commits it.
+     */
+    static final class OptionSlider<N> extends AbstractOptionSliderButton {
+        static final long SETTLE_MILLIS = 600L;
+
+        private final OptionInstance<N> instance;
+        private final OptionInstance.SliderableValueSet<N> values;
+        private final OptionInstance.TooltipSupplier<N> tooltipSupplier;
+        private final Function<N, Component> text;
+        private final Consumer<N> onValueChanged;
+        private final boolean applyImmediately;
+        private long timeToApply = -1L;
+
+        OptionSlider(
+                Options options,
+                int x,
+                int y,
+                int width,
+                int height,
+                OptionInstance<N> instance,
+                OptionInstance.SliderableValueSet<N> values,
+                OptionInstance.TooltipSupplier<N> tooltipSupplier,
+                Function<N, Component> text,
+                Consumer<N> onValueChanged,
+                boolean applyImmediately) {
+            super(options, x, y, width, height, values.toSliderValue(instance.get()));
+            this.instance = instance;
+            this.values = values;
+            this.tooltipSupplier = tooltipSupplier;
+            this.text = text;
+            this.onValueChanged = onValueChanged;
+            this.applyImmediately = applyImmediately;
+            updateMessage();
+        }
+
+        @Override
+        protected void updateMessage() {
+            N pending = values.fromSliderValue(value);
+            setMessage(text.apply(pending));
+            setTooltip(tooltipSupplier.apply(pending));
+        }
+
+        @Override
+        protected void applyValue() {
+            if (applyImmediately) {
+                applyPendingValue();
+            } else {
+                timeToApply = Util.getMillis() + SETTLE_MILLIS;
+            }
+        }
+
+        /** Applies the slider's value to its option now, if it differs. */
+        void applyPendingValue() {
+            timeToApply = -1L;
+            N pending = values.fromSliderValue(value);
+            if (!Objects.equals(pending, instance.get())) {
+                instance.set(pending);
+                onValueChanged.accept(instance.get());
+            }
+        }
+
+        @Override
+        public void renderWidget(GuiGraphics context, int mouseX, int mouseY, float delta) {
+            super.renderWidget(context, mouseX, mouseY, delta);
+            if (timeToApply >= 0L && Util.getMillis() >= timeToApply) {
+                applyPendingValue();
+            }
+        }
     }
 
     private static <T> Tooltip tooltip(RtxSetting<T> setting, T value) {

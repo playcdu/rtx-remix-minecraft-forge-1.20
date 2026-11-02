@@ -308,7 +308,7 @@ public final class BlockMeshBuilder {
             int outputVerts = 0;
             for (int s = 0; s < bucket.count && sourceStart < wantedEnd; s++) {
                 SurfaceRef ref = bucket.surfaces[s];
-                SectionMeshData.Surface source = ref.abovePreliminarySurface();
+                SectionMeshData.Surface source = ref.surface();
                 int sourceQuads = source.vertexCount() / VERTS_PER_QUAD;
                 int sourceEnd = sourceStart + sourceQuads;
                 int overlapStart = Math.max(wantedStart, sourceStart);
@@ -320,7 +320,7 @@ public final class BlockMeshBuilder {
                     int sourceByte = localFirstQuad * VERTS_PER_QUAD * STRIDE;
                     int copyBytes = copyVerts * STRIDE;
 
-                    ByteBuffer src = source.vertexBuffer().duplicateAllay().order(ByteOrder.LITTLE_ENDIAN);
+                    ByteBuffer src = source.vertexBuffer().duplicate().order(ByteOrder.LITTLE_ENDIAN);
                     src.position(sourceByte).limit(sourceByte + copyBytes);
                     vm.position(outputVerts * STRIDE);
                     vm.put(src);
@@ -358,7 +358,7 @@ public final class BlockMeshBuilder {
      */
     private static void requireCanonicalQuadIndices(SurfaceBucket bucket) {
         for (int s = 0; s < bucket.count; s++) {
-            SectionMeshData.Surface surface = bucket.surfaces[s].abovePreliminarySurface();
+            SectionMeshData.Surface surface = bucket.surfaces[s].surface();
             if (!surface.canonicalQuadIndices()
                     || surface.vertexCount() % VERTS_PER_QUAD != 0
                     || surface.indexCount() != canonicalIndexCount(surface.vertexCount())) {
@@ -416,9 +416,9 @@ public final class BlockMeshBuilder {
      */
     static void putCanonicalQuadIndices(ByteBuffer dst, int vertexCount) {
         int indexCount = canonicalIndexCount(vertexCount);
-        ByteBuffer indexBytes = dst.duplicateAllay().order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer indexBytes = dst.duplicate().order(ByteOrder.LITTLE_ENDIAN);
         indexBytes.position(0);
-        IntBuffer ints = indexBytes.recreate().order(ByteOrder.LITTLE_ENDIAN).asIntBuffer();
+        IntBuffer ints = indexBytes.slice().order(ByteOrder.LITTLE_ENDIAN).asIntBuffer();
         ints.put(canonicalIndices(indexCount), 0, indexCount);
     }
 

@@ -69,10 +69,10 @@ final class BlockLightDefaults {
         add(rules, "soul_wall_torch", exact(Blocks.SOUL_WALL_TORCH),
                 (id, state, pos, centroid) -> List.of(wallTorch(id, state, pos, SOUL_COLOR)),
                 TORCH_AUTHORED_INTENSITY_MULTIPLIER);
-        add(rules, "redstone_torch", state -> state.isOf(Blocks.REDSTONE_TORCH) && state.get(RedstoneTorchBlock.LIT),
+        add(rules, "redstone_torch", state -> state.is(Blocks.REDSTONE_TORCH) && state.getValue(RedstoneTorchBlock.LIT),
                 (id, state, pos, centroid) -> List.of(thinSphere(id, 0, state, pos, 0.5f, 0.7f, 0.5f, 0.16f, REDSTONE_COLOR)),
                 TORCH_AUTHORED_INTENSITY_MULTIPLIER);
-        add(rules, "redstone_wall_torch", state -> state.isOf(Blocks.REDSTONE_WALL_TORCH) && state.get(RedstoneWallTorchBlock.LIT),
+        add(rules, "redstone_wall_torch", state -> state.is(Blocks.REDSTONE_WALL_TORCH) && state.getValue(RedstoneWallTorchBlock.LIT),
                 (id, state, pos, centroid) -> List.of(wallTorch(id, state, pos, REDSTONE_COLOR)),
                 TORCH_AUTHORED_INTENSITY_MULTIPLIER);
         add(rules, "small_amethyst_bud", exact(Blocks.SMALL_AMETHYST_BUD),
@@ -83,19 +83,19 @@ final class BlockLightDefaults {
                 (id, state, pos, centroid) -> List.of(amethystCrystal(id, state, pos, 5.0f, 0.13f, 4)));
         add(rules, "amethyst_cluster", exact(Blocks.AMETHYST_CLUSTER),
                 (id, state, pos, centroid) -> List.of(amethystCrystal(id, state, pos, 7.0f, 0.18f, 5)));
-        add(rules, "campfire", state -> state.isOf(Blocks.CAMPFIRE) && state.get(BlockStateProperties.LIT),
+        add(rules, "campfire", state -> state.is(Blocks.CAMPFIRE) && state.getValue(BlockStateProperties.LIT),
                 (id, state, pos, centroid) -> List.of(sphere(id, 0, state, pos, 0.5f, 0.5f, 0.5f, 0.25f, CAMPFIRE_COLOR, null)),
                 CAMPFIRE_AUTHORED_INTENSITY_MULTIPLIER);
-        add(rules, "soul_campfire", state -> state.isOf(Blocks.SOUL_CAMPFIRE) && state.get(BlockStateProperties.LIT),
+        add(rules, "soul_campfire", state -> state.is(Blocks.SOUL_CAMPFIRE) && state.getValue(BlockStateProperties.LIT),
                 (id, state, pos, centroid) -> List.of(sphere(id, 0, state, pos, 0.5f, 0.5f, 0.5f, 0.25f, SOUL_COLOR, null)),
                 CAMPFIRE_AUTHORED_INTENSITY_MULTIPLIER);
         add(rules, "conduit", exact(Blocks.CONDUIT),
                 (id, state, pos, centroid) -> List.of(sphere(id, 0, state, pos, 0.5f, 0.5f, 0.5f, 0.1875f, CONDUIT_COLOR, null)));
-        add(rules, "light", state -> state.isOf(Blocks.LIGHT) && state.get(BlockStateProperties.LEVEL_15) > 0,
+        add(rules, "light", state -> state.is(Blocks.LIGHT) && state.getValue(BlockStateProperties.LEVEL) > 0,
                 (id, state, pos, centroid) -> List.of(sphere(id, 0, state, pos, 0.5f, 0.5f, 0.5f, 0.2f, LightEntry.ColorOverride.of(1, 1, 1), null)));
-        add(rules, "candles", state -> candles.contains(state.getBlock()) && state.get(CandleBlock.LIT),
+        add(rules, "candles", state -> candles.contains(state.getBlock()) && state.getValue(CandleBlock.LIT),
                 BlockLightDefaults::candles);
-        add(rules, "candle_cakes", state -> candleCakes.contains(state.getBlock()) && state.get(BlockStateProperties.LIT),
+        add(rules, "candle_cakes", state -> candleCakes.contains(state.getBlock()) && state.getValue(BlockStateProperties.LIT),
                 (id, state, pos, centroid) -> List.of(thinSphere(id, 0, state, pos, 0.5f, 1.0f, 0.5f, 0.08f, null)));
         BlockLightIntensityControls.validateBuiltInRules(rules.keySet());
         return Collections.unmodifiableMap(new LinkedHashMap<>(rules));
@@ -134,7 +134,7 @@ final class BlockLightDefaults {
     }
 
     private static Predicate<BlockState> exact(Block block) {
-        return state -> state.isOf(block);
+        return state -> state.is(block);
     }
 
     private static LightEntry sphere(ResourceLocation id, int index, BlockState state, BlockPos pos,
@@ -154,7 +154,7 @@ final class BlockLightDefaults {
 
     private static LightEntry wallTorch(ResourceLocation id, BlockState state, BlockPos pos,
                                         LightEntry.ColorOverride color) {
-        Direction facing = state.get(WallTorchBlock.FACING).getOpposite();
+        Direction facing = state.getValue(WallTorchBlock.FACING).getOpposite();
         return thinSphere(id, 0, state, pos,
                 0.5f + 0.27f * facing.getStepX(),
                 0.92f,
@@ -163,7 +163,7 @@ final class BlockLightDefaults {
     }
 
     private static LightEntry endRod(ResourceLocation id, BlockState state, BlockPos pos) {
-        Direction facing = state.get(BlockStateProperties.FACING);
+        Direction facing = state.getValue(BlockStateProperties.FACING);
         BlockLightRuleManager.Vec3 axis = BlockLightRuleManager.Vec3.fromAxis(facing.getAxis());
         return BlockLightRuleManager.cylinder(id, 0, state, pos,
                 0.5f, 0.5f, 0.5f, 0.125f, axis, 1.0f, null, null);
@@ -171,7 +171,7 @@ final class BlockLightDefaults {
 
     private static LightEntry amethystCrystal(ResourceLocation id, BlockState state, BlockPos pos,
                                               float heightPixels, float radius, int lightLevel) {
-        Direction facing = state.get(BlockStateProperties.FACING);
+        Direction facing = state.getValue(BlockStateProperties.FACING);
         float halfHeight = heightPixels / 32.0f;
         float offsetFromCenter = 0.5f - halfHeight;
         float intensity = lightLevel
@@ -186,11 +186,11 @@ final class BlockLightDefaults {
 
     private static List<LightEntry> candles(ResourceLocation id, BlockState state, BlockPos pos,
                                             BlockLightRuleManager.ModelSampler centroid) {
-        List<LightEntry> entries = new ArrayList<>(state.get(CandleBlock.CANDLES));
-        float[][] offsets = candleOffsets(state.get(CandleBlock.CANDLES));
+        List<LightEntry> entries = new ArrayList<>(state.getValue(CandleBlock.CANDLES));
+        float[][] offsets = candleOffsets(state.getValue(CandleBlock.CANDLES));
         for (int i = 0; i < offsets.length; i++) {
             float[] o = offsets[i];
-            entries.offset(thinSphere(id, i, state, pos, o[0], o[1], o[2], 0.06f, null));
+            entries.add(thinSphere(id, i, state, pos, o[0], o[1], o[2], 0.06f, null));
         }
         return entries;
     }

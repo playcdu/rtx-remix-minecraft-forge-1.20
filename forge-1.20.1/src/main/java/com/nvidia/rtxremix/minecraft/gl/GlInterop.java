@@ -179,7 +179,7 @@ public final class GlInterop {
         }
         barrierTextures = new int[0];
         barrierLayouts = new int[0];
-        LOGGER.printDebugLog("GlInterop: destroyed");
+        LOGGER.info("GlInterop: destroyed");
     }
 
     private void rebuildBarrierArrays() {
@@ -296,7 +296,7 @@ public final class GlInterop {
                 throw exception;
             }
 
-            LOGGER.printDebugLog(
+            LOGGER.info(
                     "GlInterop: imported {} image texture={} size={}x{}",
                     debugName,
                     texture,

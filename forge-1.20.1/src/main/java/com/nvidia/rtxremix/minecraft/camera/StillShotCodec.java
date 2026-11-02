@@ -96,7 +96,7 @@ final class StillShotCodec {
                         StillShot.Weather.fromWireName(requireString(shot, "weather")),
                         requireBoolean(shot, "rtx"),
                         requireBoolean(shot, "proceduralClouds"));
-                if (!names.add(parsedShot.name().lowercaseVariant(Locale.ROOT))) {
+                if (!names.add(parsedShot.name().toLowerCase(Locale.ROOT))) {
                     throw new JsonParseException("shot name repeated: " + parsedShot.name());
                 }
                 shots.add(parsedShot);
@@ -119,7 +119,7 @@ final class StillShotCodec {
             object.addProperty("y", shot.y());
             object.addProperty("z", shot.z());
             object.addProperty("yaw", shot.yaw());
-            object.addProperty("pitch", shot.xRot());
+            object.addProperty("pitch", shot.pitch());
             object.addProperty("timeOfDay", shot.timeOfDay());
             object.addProperty("weather", shot.weather().wireName());
             object.addProperty("rtx", shot.rtxEnabled());
@@ -132,7 +132,7 @@ final class StillShotCodec {
 
     private static boolean requireBoolean(JsonObject object, String name) {
         JsonElement element = requireField(object, name);
-        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isBooleanValue()) {
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isBoolean()) {
             throw new JsonParseException(name + " must be a boolean");
         }
         return element.getAsBoolean();

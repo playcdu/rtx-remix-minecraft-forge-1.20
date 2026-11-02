@@ -93,7 +93,7 @@ public final class DirectQuadWriter {
             this.category = category;
             this.key = key;
             vertices = ByteBuffer.allocate(INITIAL_VERT_SIZE).order(ByteOrder.LITTLE_ENDIAN);
-            totalAllocatedBytes.addOrGet(INITIAL_VERT_SIZE);
+            totalAllocatedBytes.addAndGet(INITIAL_VERT_SIZE);
         }
 
         int allocatedBytes() { return vertices.capacity(); }
@@ -137,13 +137,13 @@ public final class DirectQuadWriter {
             while (newCap < requiredBytes) newCap *= 2;
             if (newCap > MAX_VERT_BUF_SIZE) newCap = MAX_VERT_BUF_SIZE;
             ByteBuffer grown = ByteBuffer.allocate(newCap).order(ByteOrder.LITTLE_ENDIAN);
-            ByteBuffer src = vertices.duplicateAllay().order(ByteOrder.LITTLE_ENDIAN);
+            ByteBuffer src = vertices.duplicate().order(ByteOrder.LITTLE_ENDIAN);
             src.position(0).limit(vertexCount * STRIDE);
             grown.put(src);
             vertices = grown;
-            totalAllocatedBytes.addOrGet(newCap - oldCap);
+            totalAllocatedBytes.addAndGet(newCap - oldCap);
             totalGrowthEvents.incrementAndGet();
-            totalGrowthCopiedBytes.addOrGet((long) vertexCount * STRIDE);
+            totalGrowthCopiedBytes.addAndGet((long) vertexCount * STRIDE);
         }
 
         void reset() {
@@ -233,7 +233,7 @@ public final class DirectQuadWriter {
     /** Releases all bucket buffers so GC can reclaim the memory. */
     public void releaseBuffers() {
         for (BucketBuffer bb : bucketOrder) {
-            totalAllocatedBytes.addOrGet(-(long) bb.allocatedBytes());
+            totalAllocatedBytes.addAndGet(-(long) bb.allocatedBytes());
         }
         for (Map<String, BucketBuffer> buckets : bucketsByCategory) {
             buckets.clear();
@@ -455,7 +455,7 @@ public final class DirectQuadWriter {
 
                     int vBytes = bb.vertexCount * STRIDE;
                     ByteBuffer vb = DirectBufferPool.acquire(vBytes);
-                    ByteBuffer srcV = bb.vertices.duplicateAllay().order(ByteOrder.LITTLE_ENDIAN);
+                    ByteBuffer srcV = bb.vertices.duplicate().order(ByteOrder.LITTLE_ENDIAN);
                     srcV.position(0).limit(vBytes);
                     vb.put(srcV);
                     vb.flip();

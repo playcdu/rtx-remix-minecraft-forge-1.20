@@ -9,7 +9,7 @@ import java.nio.ByteBuffer;
 /**
  * CPU copy of one font glyph-atlas page.
  *
- * <p>Minecraft assembles a {@code GlyphAtlasTexture} on the GPU: each glyph is uploaded
+ * <p>Minecraft assembles a {@code FontTexture} on the GPU: each glyph is uploaded
  * into its slot the first time it is rendered, from a source image that may be freed the
  * moment the upload returns, so the GL texture is the only complete copy of the page.
  * Remix needs the pixels to build a material for text quads, so this mirror follows
@@ -23,13 +23,18 @@ import java.nio.ByteBuffer;
  * page is an R8 texture that {@code rendertype_text_intensity} samples as {@code .rrrr},
  * so red is spread across all four channels here.
  *
- * <p>Glyph uploads run only on the render thread ({@code NativeImage.uploadInternal}
- * asserts it) and every reader of {@link #data()} runs there too, so the page and the
- * upload scope carry no synchronisation.
+ * <p>A page is square, {@link #PAGE_SIZE} on a side in vanilla. ImmediatelyFast's font
+ * atlas resizing rewrites that constant inside {@code FontTexture}, so the mirror takes
+ * its size from the GL allocation {@code GlyphAtlasTextureMixin} sees rather than
+ * assuming vanilla's.
+ *
+ * <p>Glyph uploads run only on the render thread ({@code NativeImage._upload} and
+ * {@code GlStateManager._upload} assert it) and every reader of {@link #data()} runs
+ * there too, so the page and the upload scope carry no synchronisation.
  */
 public final class GlyphPageMirror {
 
-    /** Side of every page in pixels, as {@code GlyphAtlasTexture} hardcodes it for slots and UVs. */
+    /** Side of a vanilla page in pixels, as {@code FontTexture} hardcodes it for slots and UVs. */
     public static final int PAGE_SIZE = 256;
     private static final int CHANNELS = 4;
 
@@ -47,18 +52,45 @@ public final class GlyphPageMirror {
     private static GlyphPageMirror uploadTarget;
 
     private final boolean intensity;
-    private final byte[] data = new byte[PAGE_SIZE * PAGE_SIZE * CHANNELS];
+    private final int width;
+    private final int height;
+    private final byte[] data;
     private long version;
 
     /**
+     * A vanilla-sized page.
+     *
      * @param intensity whether the page is an R8 texture read as coverage, which is the
      *                  case for a font whose glyphs report no colour, such as TrueType
      */
     public GlyphPageMirror(boolean intensity) {
-        this.intensity = intensity;
+        this(intensity, PAGE_SIZE, PAGE_SIZE);
     }
 
-    /** Tightly packed RGBA rows, {@link #PAGE_SIZE} square. Mutated in place by {@link #blit}. */
+    /**
+     * @param intensity whether the page is an R8 texture read as coverage
+     * @param width     page width in pixels, as allocated in GL
+     * @param height    page height in pixels, as allocated in GL
+     */
+    public GlyphPageMirror(boolean intensity, int width, int height) {
+        if (width <= 0 || height <= 0) {
+            throw new IllegalArgumentException("glyph page " + width + "x" + height);
+        }
+        this.intensity = intensity;
+        this.width = width;
+        this.height = height;
+        this.data = new byte[width * height * CHANNELS];
+    }
+
+    public int width() {
+        return width;
+    }
+
+    public int height() {
+        return height;
+    }
+
+    /** Tightly packed RGBA rows, {@link #width()} by {@link #height()}. Mutated in place by {@link #blit}. */
     public byte[] data() {
         return data;
     }
@@ -82,14 +114,14 @@ public final class GlyphPageMirror {
      */
     public void blit(int x, int y, int width, int height, int channels, ByteBuffer src, int srcRowPitch) {
         if (x < 0 || y < 0 || width < 0 || height < 0
-                || x + width > PAGE_SIZE || y + height > PAGE_SIZE) {
+                || x + width > this.width || y + height > this.height) {
             throw new IllegalArgumentException("glyph " + width + "x" + height + " at " + x + "," + y
-                    + " does not fit a " + PAGE_SIZE + "x" + PAGE_SIZE + " page");
+                    + " does not fit a " + this.width + "x" + this.height + " page");
         }
         int srcRow = src.position();
         for (int row = 0; row < height; row++, srcRow += srcRowPitch) {
             int s = srcRow;
-            int d = ((y + row) * PAGE_SIZE + x) * CHANNELS;
+            int d = ((y + row) * this.width + x) * CHANNELS;
             for (int col = 0; col < width; col++, s += channels, d += CHANNELS) {
                 int r = src.get(s) & 0xFF;
                 int g = channels > 1 ? src.get(s + 1) & 0xFF : 0;

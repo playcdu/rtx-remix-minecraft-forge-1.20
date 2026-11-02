@@ -126,7 +126,7 @@ public final class CameraController {
             } else {
                 advanceRecordingClock(now);
                 long elapsedMs = recordingElapsedMs();
-                CameraPath.Waypoint lastWaypoint = recordedWaypoints.getLast();
+                CameraPath.Waypoint lastWaypoint = recordedWaypoints.get(recordedWaypoints.size() - 1);
                 if (elapsedMs > lastWaypoint.timeMs()) {
                     storeRecordingWaypoint(
                             recordedWaypoints,
@@ -136,7 +136,7 @@ public final class CameraController {
             }
             recordingHudTicks++;
             if (client.player != null && recordingHudTicks % 20 == 0) {
-                client.player.sendMessage(Component.literal("[Camera] " + status()), true);
+                client.player.displayClientMessage(Component.literal("[Camera] " + status()), true);
             }
         }
 
@@ -177,7 +177,7 @@ public final class CameraController {
         applyLoadedPath(client, positionMs);
         if (positionMs >= durationMs) {
             state = State.IDLE;
-            LOGGER.printDebugLog("Camera playback '{}' completed at {} ms using {}",
+            LOGGER.info("Camera playback '{}' completed at {} ms using {}",
                     loadedPathName, durationMs, playbackTimeline.mode().commandName());
             return;
         }
@@ -270,9 +270,9 @@ public final class CameraController {
             return "server-" + safePathComponent(serverIdentity, "multiplayer-world");
         }
 
-        if (client.world != null) {
+        if (client.level != null) {
             return "world-" + safePathComponent(
-                    client.world.getRegistryKey().getValue().toString(),
+                    client.level.dimension().location().toString(),
                     "unknown-dimension"
             );
         }
@@ -326,7 +326,7 @@ public final class CameraController {
         recordingHudTicks = 0;
         state = State.RECORDING;
         clearError();
-        LOGGER.printDebugLog("Camera recording '{}' started in {}", armedPathName, recordingTargets.runtimeDirectory());
+        LOGGER.info("Camera recording '{}' started in {}", armedPathName, recordingTargets.runtimeDirectory());
         return "Recording camera '" + armedPathName + "'. Press R again to save.";
     }
 
@@ -358,7 +358,7 @@ public final class CameraController {
         captureExactFinalWaypoint(client);
 
         if (recordedWaypoints.size() < 2
-                || recordedWaypoints.getLast().timeMs() <= recordedWaypoints.getFirst().timeMs()) {
+                || recordedWaypoints.get(recordedWaypoints.size() - 1).timeMs() <= recordedWaypoints.get(0).timeMs()) {
             return fail("Camera recording is too short; record some movement before saving.");
         }
 
@@ -366,7 +366,7 @@ public final class CameraController {
         final String json;
         try {
             path = new CameraPath(recordedWaypoints);
-            json = CameraPathCodec.serialize(path);
+            json = CameraPathCodec.toJson(path);
         } catch (RuntimeException e) {
             LOGGER.warn("Failed to finalize camera recording '{}'", armedPathName, e);
             return fail("Failed to finalize camera recording: " + safeExceptionMessage(e));
@@ -401,7 +401,7 @@ public final class CameraController {
         String savedName = armedPathName;
         loadedPathName = savedName;
         loadedPath = path;
-        playbackTimeline.updateScreenAndTick(path.durationMs());
+        playbackTimeline.reset(path.durationMs());
         state = State.IDLE;
         armedPathName = null;
         recordingTargets = null;
@@ -410,7 +410,7 @@ public final class CameraController {
         recordingHudTicks = 0;
         clearError();
 
-        LOGGER.printDebugLog("Camera '{}' saved with {} waypoints and duration {} ms to {}{}",
+        LOGGER.info("Camera '{}' saved with {} waypoints and duration {} ms to {}{}",
                 savedName,
                 path.waypoints().size(),
                 path.durationMs(),
@@ -457,7 +457,7 @@ public final class CameraController {
         recordingHudTicks = 0;
         state = State.IDLE;
         clearError();
-        LOGGER.printDebugLog("Camera recording '{}' cancelled", name);
+        LOGGER.info("Camera recording '{}' cancelled", name);
         return "Camera recording '" + name + "' cancelled without saving.";
     }
 
@@ -498,7 +498,7 @@ public final class CameraController {
             applyLoadedPath(client, 0L);
         }
         clearError();
-        LOGGER.printDebugLog("Camera playback '{}' started ({} ms, clock {})",
+        LOGGER.info("Camera playback '{}' started ({} ms, clock {})",
                 loadedPathName, durationMs(), playbackTimeline.mode().commandName());
         return "Playing camera '" + loadedPathName + "' (" + formatSeconds(durationMs())
                 + "s) with " + playbackTimeline.mode().commandName() + " clock.";
@@ -557,7 +557,7 @@ public final class CameraController {
         }
 
         long clampedTimeMs = clamp(timeMs, 0L, durationMs());
-        playbackTimeline.updateScreenAndTick(clampedTimeMs);
+        playbackTimeline.reset(clampedTimeMs);
         playbackLastNanos = nowNanos();
 
         Minecraft client = Minecraft.getInstance();
@@ -594,7 +594,7 @@ public final class CameraController {
                 state = State.IDLE;
                 playbackTimeline.reanchor(true);
                 clearError();
-                LOGGER.printDebugLog("Camera playback '{}' stopped at {} ms", name, positionMs());
+                LOGGER.info("Camera playback '{}' stopped at {} ms", name, positionMs());
                 yield "Stopped camera '" + name + "' at " + formatSeconds(positionMs()) + "s.";
             }
             case IDLE -> {
@@ -637,7 +637,7 @@ public final class CameraController {
         }
 
         state = State.IDLE;
-        playbackTimeline.updateScreenAndTick(0L);
+        playbackTimeline.reset(0L);
         clearError();
         return true;
     }
@@ -682,7 +682,7 @@ public final class CameraController {
 
     public String setTimeOfDay(long timeOfDay) {
         Minecraft client = Minecraft.getInstance();
-        if (client.world == null) {
+        if (client.level == null) {
             return fail("No world loaded.");
         }
 
@@ -694,12 +694,12 @@ public final class CameraController {
 
     public Long adjustTimeOfDay(long deltaTicks) {
         Minecraft client = Minecraft.getInstance();
-        if (client.world == null) {
+        if (client.level == null) {
             fail("No world loaded.");
             return null;
         }
 
-        long normalized = normalizeTimeOfDay(client.world.getDayTime() + deltaTicks);
+        long normalized = normalizeTimeOfDay(client.level.getDayTime() + deltaTicks);
         applyTimeOfDay(client, normalized);
         clearError();
         return normalized;
@@ -736,10 +736,10 @@ public final class CameraController {
         LocalPlayer player = client.player;
         StillShot shot = new StillShot(
                 name, player.getX(), player.getY(), player.getZ(),
-                Mth.wrapDegrees(player.getYaw()), player.getPitch(),
-                normalizeTimeOfDay(client.world.getDayTime()),
+                Mth.wrapDegrees(player.getYRot()), player.getXRot(),
+                normalizeTimeOfDay(client.level.getDayTime()),
                 scene.weather(), scene.rtxEnabled(), scene.proceduralClouds());
-        boolean replaced = shots.removeAll(existing -> existing.name().equalsIgnoreCase(name));
+        boolean replaced = shots.removeIf(existing -> existing.name().equalsIgnoreCase(name));
         shots.add(shot);
         String written = writeStillShots(client, set, shots);
         if (written == null) {
@@ -765,7 +765,7 @@ public final class CameraController {
         if (shots == null) {
             return lastError;
         }
-        if (!shots.removeAll(existing -> existing.name().equalsIgnoreCase(name))) {
+        if (!shots.removeIf(existing -> existing.name().equalsIgnoreCase(name))) {
             return fail("No shot '" + name + "' in set '" + set + "'.");
         }
         String written = writeStillShots(client, set, shots);
@@ -838,8 +838,8 @@ public final class CameraController {
             return;
         }
         LocalPlayer player = client.player;
-        player.moveTo(shot.x(), shot.y(), shot.z(), shot.yaw(), shot.xRot());
-        player.setVelocity(0.0, 0.0, 0.0);
+        player.moveTo(shot.x(), shot.y(), shot.z(), shot.yaw(), shot.pitch());
+        player.setDeltaMovement(0.0, 0.0, 0.0);
         applyTimeOfDay(client, shot.timeOfDay());
     }
 
@@ -853,15 +853,15 @@ public final class CameraController {
         if (server == null || client.player == null) {
             return;
         }
-        UUID uuid = client.player.getUuid();
+        UUID uuid = client.player.getUUID();
         server.execute(() -> {
             ServerPlayer serverPlayer = server.getPlayerList().getPlayer(uuid);
             if (serverPlayer == null) {
                 return;
             }
             serverPlayer.teleportTo(serverPlayer.serverLevel(),
-                    shot.x(), shot.y(), shot.z(), shot.yaw(), shot.xRot());
-            serverPlayer.setVelocity(0.0, 0.0, 0.0);
+                    shot.x(), shot.y(), shot.z(), shot.yaw(), shot.pitch());
+            serverPlayer.setDeltaMovement(0.0, 0.0, 0.0);
         });
     }
 
@@ -892,7 +892,7 @@ public final class CameraController {
     /** Writes the set to the runtime file and, when managed, the shot directory; returns where. */
     private String writeStillShots(Minecraft client, String set, List<StillShot> shots) {
         StorageTargets targets = storageTargets(client);
-        String json = StillShotCodec.serialize(shots);
+        String json = StillShotCodec.toJson(shots);
         Path runtimeFile = stillShotFile(targets, set);
         try {
             writeAtomically(runtimeFile, json);
@@ -924,7 +924,7 @@ public final class CameraController {
 
     private static String formatPose(StillShot shot) {
         return String.format(Locale.ROOT, "%.1f %.1f %.1f yaw %.1f pitch %.1f",
-                shot.x(), shot.y(), shot.z(), shot.yaw(), shot.xRot());
+                shot.x(), shot.y(), shot.z(), shot.yaw(), shot.pitch());
     }
 
     /** Scene state a mark records beside the pose; read by the command, since the camera package owns no renderer state. */
@@ -996,9 +996,9 @@ public final class CameraController {
                 CameraPath path = CameraPathCodec.parse(json);
                 loadedPathName = normalizedName;
                 loadedPath = path;
-                playbackTimeline.updateScreenAndTick(0L);
+                playbackTimeline.reset(0L);
                 clearError();
-                LOGGER.printDebugLog("Loaded camera '{}' from {} ({} waypoints, {} ms)",
+                LOGGER.info("Loaded camera '{}' from {} ({} waypoints, {} ms)",
                         normalizedName, candidate, path.waypoints().size(), path.durationMs());
                 return true;
             } catch (IOException | RuntimeException e) {
@@ -1011,7 +1011,7 @@ public final class CameraController {
 
         if (!foundCandidate) {
             fail("Camera '" + normalizedName + "' was not found at "
-                    + String.join(", ", candidates.outFromOrigin().map(Path::toString).toList()) + ".");
+                    + String.join(", ", candidates.stream().map(Path::toString).toList()) + ".");
         } else {
             fail("Failed to load camera '" + normalizedName + "' from every available source: "
                     + String.join("; ", failures));
@@ -1175,16 +1175,16 @@ public final class CameraController {
             long timeMs,
             Minecraft client
     ) {
-        Long timeOfDay = client.world == null
+        Long timeOfDay = client.level == null
                 ? null
-                : normalizeTimeOfDay(client.world.getDayTime());
+                : normalizeTimeOfDay(client.level.getDayTime());
         return new CameraPath.Waypoint(
                 timeMs,
                 player.getX(),
                 player.getY(),
                 player.getZ(),
-                player.getYaw(),
-                player.getPitch(),
+                player.getYRot(),
+                player.getXRot(),
                 timeOfDay
         );
     }
@@ -1201,9 +1201,9 @@ public final class CameraController {
                 sample.y(),
                 sample.z(),
                 sample.yaw(),
-                sample.xRot()
+                sample.pitch()
         );
-        player.setVelocity(0.0, 0.0, 0.0);
+        player.setDeltaMovement(0.0, 0.0, 0.0);
         if (sample.timeOfDay() != null) {
             applyTimeOfDay(client, sample.timeOfDay());
         }
@@ -1211,8 +1211,8 @@ public final class CameraController {
 
     private static void applyTimeOfDay(Minecraft client, long timeOfDay) {
         long normalized = normalizeTimeOfDay(timeOfDay);
-        if (client.world != null) {
-            client.world.setDayTime(normalized);
+        if (client.level != null) {
+            client.level.setDayTime(normalized);
         }
 
         MinecraftServer server = client.getSingleplayerServer();
@@ -1224,7 +1224,7 @@ public final class CameraController {
     }
 
     private static long normalizeTimeOfDay(long timeOfDay) {
-        return Math.positiveModulo(timeOfDay, MINECRAFT_DAY_TICKS);
+        return Math.floorMod(timeOfDay, MINECRAFT_DAY_TICKS);
     }
 
     private static boolean isActive(Minecraft client) {
@@ -1232,7 +1232,7 @@ public final class CameraController {
     }
 
     private static boolean hasPlayerAndWorld(Minecraft client) {
-        return client != null && client.player != null && client.world != null;
+        return client != null && client.player != null && client.level != null;
     }
 
     /**
@@ -1269,11 +1269,11 @@ public final class CameraController {
 
     private static void writeAtomically(Path file, String json) throws IOException {
         Path directory = file.getParent();
-        Files.createDirectoriesSafe(directory);
+        Files.createDirectories(directory);
         Path temporaryFile = Files.createTempFile(directory, file.getFileName().toString() + ".", ".tmp");
         boolean moved = false;
         try {
-            Files.writeUtf(temporaryFile, json, StandardCharsets.UTF_8);
+            Files.writeString(temporaryFile, json, StandardCharsets.UTF_8);
             try {
                 Files.move(
                         temporaryFile,
@@ -1298,7 +1298,7 @@ public final class CameraController {
             return null;
         }
         String normalized = name.trim();
-        if (normalized.lowercaseVariant(Locale.ROOT).endsWith(".json")) {
+        if (normalized.toLowerCase(Locale.ROOT).endsWith(".json")) {
             normalized = normalized.substring(0, normalized.length() - ".json".length());
         }
         if (!CameraNames.isValid(normalized)) {
@@ -1307,7 +1307,7 @@ public final class CameraController {
         }
         // Shot sets share the camera directory as <set>.shots.json, so a camera
         // path may not take that spelling or a recording would replace a set.
-        if (normalized.lowercaseVariant(Locale.ROOT).endsWith(RESERVED_SHOT_SET_NAME_SUFFIX)) {
+        if (normalized.toLowerCase(Locale.ROOT).endsWith(RESERVED_SHOT_SET_NAME_SUFFIX)) {
             fail("Invalid camera name '" + name + "'. Names ending in '" + RESERVED_SHOT_SET_NAME_SUFFIX
                     + "' are reserved for shot sets.");
             return null;

@@ -16,7 +16,7 @@ import net.minecraft.client.Options;
 public final class UnfocusedFramerateLimit {
 
     public static final int MIN = 10;
-    public static final int UNLIMITED = Options.MAX_FRAMERATE;
+    public static final int UNLIMITED = Options.UNLIMITED_FRAMERATE_CUTOFF;
     /**
      * Vanilla's Max Framerate moves in steps of 10, and its top step is its
      * Unlimited value, so the slider needs no separate sentinel position.

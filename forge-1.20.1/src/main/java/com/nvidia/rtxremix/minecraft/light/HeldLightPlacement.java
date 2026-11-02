@@ -13,6 +13,7 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.EnumMap;
+import net.minecraft.util.Mth;
 
 /**
  * Places local first-person item lights on the camera centerline while keeping
@@ -32,8 +33,8 @@ final class HeldLightPlacement {
 
     Vec3 resolve(ClientLevel world, Camera camera, Entity source,
                   EquipmentSlot slot, double emitterRadius, float dtSeconds) {
-        Vec3 origin = camera.getPos();
-        Vec3 forward = horizontalForward(camera.getYaw());
+        Vec3 origin = camera.getPosition();
+        Vec3 forward = horizontalForward(camera.getYRot());
         double expansion = Math.max(0.0, emitterRadius) + WALL_CLEARANCE;
         double targetDistance = collisionLimitedDistance(
                 world,
@@ -47,7 +48,7 @@ final class HeldLightPlacement {
                 ? targetDistance
                 : advanceDistance(previousDistance, targetDistance, dtSeconds);
         previousDistances.put(slot, distance);
-        return origin.add(forward.multiply(distance));
+        return origin.add(forward.scale(distance));
     }
 
     void reset(EquipmentSlot slot) {
@@ -70,7 +71,7 @@ final class HeldLightPlacement {
             Vec3 direction,
             double preferredDistance,
             double expansion) {
-        Vec3 preferredPosition = origin.add(direction.multiply(preferredDistance));
+        Vec3 preferredPosition = origin.add(direction.scale(preferredDistance));
         AABB queryBox = new AABB(
                 Math.min(origin.x, preferredPosition.x) - expansion,
                 Math.min(origin.y, preferredPosition.y) - expansion,
@@ -112,7 +113,7 @@ final class HeldLightPlacement {
         if (target <= previous) {
             return target;
         }
-        float clampedDt = Math.clamp(dtSeconds, 0.0f, MAX_FRAME_DT_SECONDS);
+        float clampedDt = Mth.clamp(dtSeconds, 0.0f, MAX_FRAME_DT_SECONDS);
         return Math.min(target, previous + OUTWARD_SPEED * clampedDt);
     }
 

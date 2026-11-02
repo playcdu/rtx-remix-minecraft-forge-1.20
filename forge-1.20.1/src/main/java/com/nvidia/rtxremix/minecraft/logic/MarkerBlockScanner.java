@@ -61,14 +61,14 @@ public final class MarkerBlockScanner {
             for (ServerLevel world : server.getAllLevels()) {
                 // Overlapping player view ranges must not double-scan a chunk.
                 HashSet<Long> visited = new HashSet<>();
-                for (var player : world.getPlayers()) {
-                    ChunkPos center = player.getChunkPos();
+                for (var player : world.players()) {
+                    ChunkPos center = player.chunkPosition();
                     for (int cx = center.x - viewDistance; cx <= center.x + viewDistance; cx++) {
                         for (int cz = center.z - viewDistance; cz <= center.z + viewDistance; cz++) {
                             if (!sessionIsCurrent.getAsBoolean()) {
                                 return;
                             }
-                            if (!visited.offset(ChunkPos.asLong(cx, cz))) {
+                            if (!visited.add(ChunkPos.asLong(cx, cz))) {
                                 continue;
                             }
                             ChunkAccess chunk = world.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
@@ -80,7 +80,7 @@ public final class MarkerBlockScanner {
                     }
                 }
             }
-            LOGGER.printDebugLog("Zone rescan complete: {} loaded chunks scanned, {} zones registered", scanned, registry.zones().size());
+            LOGGER.info("Zone rescan complete: {} loaded chunks scanned, {} zones registered", scanned, registry.zones().size());
         });
     }
 
@@ -94,7 +94,7 @@ public final class MarkerBlockScanner {
             if (command == null) {
                 continue;
             }
-            String trimmed = command.stripFormatting();
+            String trimmed = command.strip();
             String withoutSlash = trimmed.startsWith("/") ? trimmed.substring(1) : trimmed;
             if (!withoutSlash.startsWith(MARKER)) {
                 continue;
@@ -104,14 +104,14 @@ public final class MarkerBlockScanner {
                     && !Character.isWhitespace(withoutSlash.charAt(MARKER.length()))) {
                 continue;
             }
-            BlockPos pos = be.getPos();
+            BlockPos pos = be.getBlockPos();
             try {
                 ZoneDefinition zone = ZoneDefinition.parse(trimmed,
                         pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
                 ZoneDefinition previous = registry.put(zone);
                 if (previous == null) {
                     // CHUNK_LOAD re-fires on border->full re-promotions; only announce new zones.
-                    LOGGER.printDebugLog("Zone '{}' -> channel '{}' registered from command block at {}",
+                    LOGGER.info("Zone '{}' -> channel '{}' registered from command block at {}",
                             zone.name(), zone.channel(), pos.toShortString());
                 } else {
                     LOGGER.debug("Zone '{}' -> channel '{}' re-registered from command block at {}",

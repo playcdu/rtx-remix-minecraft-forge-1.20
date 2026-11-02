@@ -36,8 +36,8 @@ public final class BlockDataQueue {
     private static final long MAX_DRAIN_BYTES = Math.max(4L * 1024L * 1024L,
             Long.getLong("rtxremix.blockDataQueue.maxDrainBytes", DEFAULT_MAX_DRAIN_BYTES));
     // Total time a producer may block on a full queue before trading the
-    // oldest queued capture for liveness. Producers are vanilla's shared
-    // chunk workers holding ChunkBuilder buffer slots; parking them
+    // oldest queued capture for liveness. Producers are Embeddium's chunk
+    // builder workers, each holding its thread's build buffers; parking them
     // indefinitely halts world loading everywhere, so a wedged or outpaced
     // drain must cost a recapture, never a frozen worker pool.
     private static final long DEFAULT_PUBLISH_WAIT_BUDGET_NS = Math.max(50_000_000L,
@@ -60,7 +60,7 @@ public final class BlockDataQueue {
 
     /**
      * Section whose capture was sacrificed under backpressure. The render
-     * thread must re-flag it for vanilla rebuild or its terrain stays stale
+     * thread must re-flag it for an Embeddium rebuild or its terrain stays stale
      * until an unrelated update touches it.
      */
     public record EvictedSection(int x, int y, int z) {}
@@ -88,7 +88,7 @@ public final class BlockDataQueue {
         }
 
         void close() {
-            if (!closed.replace(false, true)) return;
+            if (!closed.compareAndSet(false, true)) return;
             signalCapacityWaiters();
             discardRetiredDataIfQuiescent();
         }
@@ -132,7 +132,7 @@ public final class BlockDataQueue {
     }
 
     /**
-     * Called with the identity captured at SectionBuilder.build HEAD. Takes over
+     * Called with the identity captured when ChunkBuilderMeshingTask.execute starts. Takes over
      * the capture's mesh data: it is released here when the capture is dropped
      * and otherwise travels to the render thread with the queue entry.
      */
@@ -167,8 +167,8 @@ public final class BlockDataQueue {
             // Publish accounting before the queue node so the render thread can
             // never consume an entry whose counters have not yet been charged.
             state.pendingItems.incrementAndGet();
-            state.pendingBytes.addOrGet(bytes);
-            state.queue.offset(new QueuedSectionData(new QueuedCapture(data, capture), bytes));
+            state.pendingBytes.addAndGet(bytes);
+            state.queue.add(new QueuedSectionData(new QueuedCapture(data, capture), bytes));
         } finally {
             endPublish(state);
         }
@@ -198,11 +198,11 @@ public final class BlockDataQueue {
             if (next == null) continue;
 
             state.pendingItems.decrementAndGet();
-            state.pendingBytes.addOrGet(-next.bytes);
+            state.pendingBytes.addAndGet(-next.bytes);
             releaseCapacity(state, next.bytes);
 
             if (isCurrent(next.capture)) {
-                out.offset(next.capture);
+                out.add(next.capture);
                 outputCount++;
             } else {
                 releaseMeshData(next.capture.data());
@@ -239,7 +239,7 @@ public final class BlockDataQueue {
 
     /**
      * Drains sections whose captures were sacrificed under backpressure so the
-     * render thread can re-flag them for vanilla rebuild. World changes drop
+     * render thread can re-flag them for an Embeddium rebuild. World changes drop
      * stale entries with the rest of the queue state.
      */
     public static int drainEvictedSections(List<EvictedSection> out, int maxItems) {
@@ -247,7 +247,7 @@ public final class BlockDataQueue {
         int drained = 0;
         EvictedSection section;
         while (drained < maxItems && (section = state.evictedSections.poll()) != null) {
-            out.offset(section);
+            out.add(section);
             drained++;
         }
         return drained;
@@ -286,12 +286,12 @@ public final class BlockDataQueue {
         if (!isCaptureCurrent(state, data, capture)) return false;
         if (tryReserveCapacity(state, bytes)) return true;
 
-        // WorldRenderer can rebuild nearby chunks synchronously. It is also
+        // Embeddium can run a meshing task on the render thread. It is also
         // the sole consumer, so waiting here would prevent the queue from ever
         // freeing capacity. Worker captures remain subject to both bounds.
         if (isRenderThread()) {
             state.reservedItems.incrementAndGet();
-            state.reservedBytes.addOrGet(bytes);
+            state.reservedBytes.addAndGet(bytes);
             return true;
         }
 
@@ -363,7 +363,7 @@ public final class BlockDataQueue {
      * Consumes the queue head without publishing it and returns its byte
      * reservation, which the caller now owns together with its item slot; -1
      * when the queue is empty. A current head for another section is recorded
-     * so the render thread can re-flag it for vanilla rebuild. A head whose
+     * so the render thread can re-flag it for an Embeddium rebuild. A head whose
      * chunk already unloaded needs no recapture, and one for the incoming
      * section is superseded by the capture about to be published.
      */
@@ -372,13 +372,13 @@ public final class BlockDataQueue {
         if (head == null) return -1L;
 
         state.pendingItems.decrementAndGet();
-        state.pendingBytes.addOrGet(-head.bytes);
+        state.pendingBytes.addAndGet(-head.bytes);
         releaseMeshData(head.capture.data());
 
         SectionPos sacrificed = head.capture.data().sectionPos();
         if (isCurrent(head.capture) && !sacrificed.equals(incoming.sectionPos())) {
             BACKPRESSURE_EVICTIONS.incrementAndGet();
-            state.evictedSections.offset(new EvictedSection(
+            state.evictedSections.add(new EvictedSection(
                     sacrificed.getX(), sacrificed.getY(), sacrificed.getZ()));
         }
         return head.bytes;
@@ -397,7 +397,7 @@ public final class BlockDataQueue {
         while (true) {
             int items = state.reservedItems.get();
             if (items >= MAX_PENDING_ITEMS) return false;
-            if (state.reservedItems.replace(items, items + 1)) return true;
+            if (state.reservedItems.compareAndSet(items, items + 1)) return true;
         }
     }
 
@@ -412,12 +412,12 @@ public final class BlockDataQueue {
             long reserved = state.reservedBytes.get();
             long others = reserved - held;
             if (wanted > held && others > 0 && wanted > MAX_PENDING_BYTES - others) return false;
-            if (state.reservedBytes.replace(reserved, reserved + wanted - held)) return true;
+            if (state.reservedBytes.compareAndSet(reserved, reserved + wanted - held)) return true;
         }
     }
 
     private static void releaseCapacity(QueueState state, long bytes) {
-        state.reservedBytes.addOrGet(-bytes);
+        state.reservedBytes.addAndGet(-bytes);
         state.reservedItems.decrementAndGet();
     }
 

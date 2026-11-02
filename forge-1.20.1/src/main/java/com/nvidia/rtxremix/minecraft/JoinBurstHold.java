@@ -32,7 +32,7 @@ public final class JoinBurstHold {
 
     public static final String PROPERTY = "rtxremix.joinHold";
     /** Read once: the switch is a launch decision, not a per-join one. */
-    public static final boolean ENABLED = Boolean.get(System.getProperty(PROPERTY, "true"));
+    public static final boolean ENABLED = Boolean.parseBoolean(System.getProperty(PROPERTY, "true"));
 
     /** A frame at least this long belongs to the burst. */
     static final long SLOW_FRAME_NANOS = 100_000_000L;
@@ -71,7 +71,7 @@ public final class JoinBurstHold {
             fastStreak = nowNanos - lastFrameNanos < SLOW_FRAME_NANOS ? fastStreak + 1 : 0;
             if (fastStreak >= SETTLE_STREAK) {
                 holding = false;
-                LOGGER.printDebugLog("World-join burst settled after {} ms ({} consecutive frames under {} ms)",
+                LOGGER.info("World-join burst settled after {} ms ({} consecutive frames under {} ms)",
                         (nowNanos - holdStartNanos) / 1_000_000L, SETTLE_STREAK, SLOW_FRAME_NANOS / 1_000_000L);
             }
         }
@@ -86,7 +86,7 @@ public final class JoinBurstHold {
     public boolean keepScreen(long nowNanos) {
         if (holding && nowNanos - holdStartNanos >= MAX_HOLD_NANOS) {
             holding = false;
-            LOGGER.printDebugLog("World-join burst did not settle within {} s; releasing the terrain-download screen",
+            LOGGER.info("World-join burst did not settle within {} s; releasing the terrain-download screen",
                     MAX_HOLD_NANOS / 1_000_000_000L);
         }
         return holding;

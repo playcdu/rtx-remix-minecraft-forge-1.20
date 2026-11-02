@@ -23,7 +23,7 @@ import java.util.List;
  * one (an entity rendered from inside another render, such as a spawner's display
  * entity) appends its bones to the enclosing capture, exactly as feature-renderer
  * overlays already do. Bone boundaries are detected by
- * {@link RemixCapturingConsumer} when the {@code MatrixStack.Entry} pose changes
+ * {@link RemixCapturingConsumer} when the {@code PoseStack.Pose} pose changes
  * between vertices.
  *
  * <h3>Rigid pivot tracking</h3>
@@ -135,7 +135,7 @@ public final class EntityRenderContext {
      * stained glass are {@code L_TRANS}, clear glass {@code L_GLASS}.
      *
      * <p>Set by {@code ItemRendererMixin} for the duration of one
-     * {@code ItemRenderer.renderItem} call and sampled by
+     * {@code ItemRenderer.render} call and sampled by
      * {@link RemixCapturingConsumer} as each part opens, so the answer travels
      * with the geometry that item produced.
      */
@@ -164,7 +164,7 @@ public final class EntityRenderContext {
     // ---- Bone tracking ----
 
     /**
-     * Called at each {@code ModelPart.Cuboid.compile()} to register a rigid pivot.
+     * Called at each {@code ModelPart.Cube.compile()} to register a rigid pivot.
      *
      * <p>Bones are appended in traversal order. Several rendering passes can run
      * for one entity (base model plus FeatureRenderer overlays) and each appends

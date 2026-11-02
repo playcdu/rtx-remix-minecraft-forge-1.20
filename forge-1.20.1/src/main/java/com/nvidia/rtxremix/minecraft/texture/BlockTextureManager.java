@@ -174,7 +174,7 @@ public class BlockTextureManager {
             u0 = s.getU0(); v0 = s.getV0(); u1 = s.getU1(); v1 = s.getV1();
             pixX = s.getX(); pixY = s.getY();
             SpriteContents contents = s.contents();
-            pixW = contents.getWidth(); pixH = contents.getHeight();
+            pixW = contents.width(); pixH = contents.height();
             transparentPixels = scanTransparency(contents, pixW, pixH);
             hasTransparency = transparentPixels != null && !transparentPixels.isEmpty();
         }
@@ -388,7 +388,7 @@ public class BlockTextureManager {
                     frameTimes[i] = frame.time;
                 }
                 int variantW = (sI != null) ? sW : aoW;
-                int frameColumns = Math.max(1, variantW / Math.max(1, contents.getWidth()));
+                int frameColumns = Math.max(1, variantW / Math.max(1, contents.width()));
                 result.put(e.getKey().toString(),
                     new AnimatedSpriteLabPBR(aoTable, aoW, aoH,
                                              sAlphaTable, sRoughnessTable, sMetallicTable, sSssTable,
@@ -960,7 +960,7 @@ public class BlockTextureManager {
             for (BlockState state : block.getStateDefinition().getPossibleStates())
                 maxLum = Math.max(maxLum, state.getLightEmission());
             if (maxLum > 0) {
-                ResourceLocation id = BuiltInRegistries.BLOCK.location(block);
+                ResourceLocation id = BuiltInRegistries.BLOCK.getKey(block);
                 map.merge(id.getNamespace() + ":block/" + id.getPath(), maxLum, Math::max);
             }
         }
@@ -1032,7 +1032,7 @@ public class BlockTextureManager {
             NativeImage img = ((SpriteContentsAccessor) sprite.contents()).getImage();
             if (img == null) continue;
             int sx = sprite.getX(), sy = sprite.getY();
-            int sw = sprite.contents().getWidth(), sh = sprite.contents().getHeight();
+            int sw = sprite.contents().width(), sh = sprite.contents().height();
             for (int y = 0; y < sh; y++)
                 for (int x = 0; x < sw; x++) {
                     int abgr = img.getPixelRGBA(x, y);
@@ -1230,7 +1230,7 @@ public class BlockTextureManager {
      * 3. Warm white fallback
      */
     public float[] getLightColorForBlock(Block block) {
-        ResourceLocation id = BuiltInRegistries.BLOCK.location(block);
+        ResourceLocation id = BuiltInRegistries.BLOCK.getKey(block);
         String path = id.getPath();
 
         float[] known = KNOWN_LIGHT_COLORS.get(path);

@@ -5,14 +5,15 @@
 package com.nvidia.rtxremix.minecraft.gl;
 
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.systems.VertexSorter;
-import net.minecraft.client.Minecraft;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.BufferUploader;
-import net.minecraft.client.renderer.GameRenderer;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.VertexSorting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.GameRenderer;
 import org.joml.Matrix4f;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,7 +35,7 @@ public class TextureOverlay {
     
     public TextureOverlay() {
         this.client = Minecraft.getInstance();
-        LOGGER.printDebugLog("TextureOverlay initialized");
+        LOGGER.info("TextureOverlay initialized");
     }
     
     /**
@@ -66,7 +67,9 @@ public class TextureOverlay {
             client.getMainRenderTarget().bindWrite(true);
         }
 
+        // setProjectionMatrix stores a copy, so the saved reference stays intact.
         Matrix4f savedProjection = RenderSystem.getProjectionMatrix();
+        VertexSorting savedSorting = RenderSystem.getVertexSorting();
 
         // Opaque: the Remix image replaces vanilla's output rather than blending
         // with it, and it neither tests nor writes depth.
@@ -77,43 +80,44 @@ public class TextureOverlay {
         Matrix4f projMatrix = new Matrix4f().setOrtho(
             0.0f, (float) width, (float) height, 0.0f, -1000.0f, 1000.0f
         );
-        RenderSystem.setOrthoMatrix(projMatrix, VertexSorter.BY_Z);
+        RenderSystem.setProjectionMatrix(projMatrix, VertexSorting.ORTHOGRAPHIC_Z);
 
-        RenderSystem.getModelViewStack().pushMatrix();
-        RenderSystem.getModelViewStack().identity();
+        PoseStack modelViewStack = RenderSystem.getModelViewStack();
+        modelViewStack.pushPose();
+        modelViewStack.setIdentity();
         RenderSystem.applyModelViewMatrix();
 
         RenderSystem.setShader(GameRenderer::getPositionTexShader);
         RenderSystem.setShaderTexture(0, texId);
-        RenderSystem.setColor(1.0f, 1.0f, 1.0f, 1.0f);
+        RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
 
         // Standard GL UVs, with (0,0) at the top left: the interop blit already
         // corrects the Vulkan image's orientation.
         Matrix4f identity = new Matrix4f();
-        BufferBuilder bufferBuilder = Tesselator.getInstance()
-            .begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEXTURE);
+        BufferBuilder bufferBuilder = Tesselator.getInstance().getBuilder();
+        bufferBuilder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX);
 
-        bufferBuilder.vertex(identity, 0,     0,      0).texture(0.0f, 0.0f);
-        bufferBuilder.vertex(identity, 0,     height, 0).texture(0.0f, 1.0f);
-        bufferBuilder.vertex(identity, width, height, 0).texture(1.0f, 1.0f);
-        bufferBuilder.vertex(identity, width, 0,      0).texture(1.0f, 0.0f);
+        bufferBuilder.vertex(identity, 0,     0,      0).uv(0.0f, 0.0f).endVertex();
+        bufferBuilder.vertex(identity, 0,     height, 0).uv(0.0f, 1.0f).endVertex();
+        bufferBuilder.vertex(identity, width, height, 0).uv(1.0f, 1.0f).endVertex();
+        bufferBuilder.vertex(identity, width, 0,      0).uv(1.0f, 0.0f).endVertex();
 
         BufferUploader.drawWithShader(bufferBuilder.end());
 
-        RenderSystem.getModelViewStack().popMatrix();
+        modelViewStack.popPose();
         RenderSystem.applyModelViewMatrix();
-        RenderSystem.setOrthoMatrix(savedProjection, VertexSorter.BY_Z);
+        RenderSystem.setProjectionMatrix(savedProjection, savedSorting);
 
         RenderSystem.depthMask(true);
         RenderSystem.enableDepthTest();
         // Blend is left disabled; the HUD enables it when it needs it.
-        RenderSystem.setColor(1.0f, 1.0f, 1.0f, 1.0f);
+        RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
     }
     
     /**
      * Cleans up resources.
      */
     public void shutdown() {
-        LOGGER.printDebugLog("TextureOverlay shutdown");
+        LOGGER.info("TextureOverlay shutdown");
     }
 }

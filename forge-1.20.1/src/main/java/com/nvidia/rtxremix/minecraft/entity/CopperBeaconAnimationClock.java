@@ -4,13 +4,14 @@
  */
 package com.nvidia.rtxremix.minecraft.entity;
 
+import net.minecraft.util.Mth;
 import net.minecraft.world.level.Level;
 
 /**
  * Reconstructs a smooth presentation time from synchronized integer world ticks.
  *
  * <p>The block-entity renderer's tick delta can remain fixed while a handled
- * screen is open. Level ticks still arrive at 20 Hz, so anchoring each observed
+ * screen is open. World ticks still arrive at 20 Hz, so anchoring each observed
  * tick to monotonic render time preserves synchronization without showing those
  * ticks as visible rotation steps.
  */
@@ -30,7 +31,7 @@ public final class CopperBeaconAnimationClock {
 
     static double sample(
             Level currentWorld, long currentTick, float tickDelta, long nowNanos) {
-        double vanillaFraction = Math.clamp(
+        double vanillaFraction = Mth.clamp(
                 Float.isFinite(tickDelta) ? tickDelta : 0.0f,
                 0.0f,
                 1.0f);
@@ -40,7 +41,7 @@ public final class CopperBeaconAnimationClock {
             tickStartNanos = nowNanos - (long) (vanillaFraction * NANOS_PER_TICK);
         }
 
-        double elapsedFraction = Math.clamp(
+        double elapsedFraction = Mth.clamp(
                 (nowNanos - tickStartNanos) / (double) NANOS_PER_TICK,
                 0.0,
                 1.0);

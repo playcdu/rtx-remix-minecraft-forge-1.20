@@ -4,8 +4,10 @@
  */
 package com.nvidia.rtxremix.minecraft;
 
-import net.fabricmc.loader.api.FabricLoader; // PORT: Fabric API
-import net.fabricmc.loader.api.ModContainer; // PORT: Fabric API
+import net.minecraftforge.fml.ModList;
+import net.minecraftforge.fml.loading.FMLPaths;
+import net.minecraftforge.forgespi.language.IModFileInfo;
+import net.minecraftforge.forgespi.language.IModInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,6 +36,12 @@ import java.util.stream.Collectors;
  * {@code textures/}, where {@code SkyRenderer} and {@code BlockTextureManager}
  * load them, so a JAR that a launcher drops into {@code mods/} needs nothing
  * beside it.
+ *
+ * <p>The payload is read from the JAR's {@code native/} directory through the
+ * mod file's own file system: Forge serves a mod JAR through its union file
+ * system, whose paths list, walk, read and copy like any other, so the tree
+ * logic below is the same for a JAR and for a development resources folder.
+ * The marker carries the {@code mods.toml} version of this mod.
  */
 public final class NativeExtractor {
 
@@ -86,7 +94,7 @@ public final class NativeExtractor {
     /**
      * Extracts the bundled native/runtime payload if the version marker is
      * absent or stale, or the runtime is missing. Safe to call early in mod init:
-     * uses only Fabric Loader APIs.
+     * uses only FML APIs, which mod construction already has.
      *
      * <p>Non-SDK directories other than {@code textures/}, such as the
      * {@code rtx-remix/} gameplay conf payload, are copied into the game
@@ -126,23 +134,32 @@ public final class NativeExtractor {
      */
     public static void extractIfNeeded() {
         try {
-            ModContainer container = FabricLoader.getInstance()
-                    .getModContainer(RtxRemixCommonMod.MOD_ID)
-                    .orElse(null);
-            if (container == null) {
-                LOGGER.warn("Cannot find own mod container, skipping native extraction");
+            ModList mods = ModList.get();
+            IModFileInfo modFile = mods != null ? mods.getModFileById(RtxRemixCommonMod.MOD_ID) : null;
+            if (modFile == null) {
+                LOGGER.warn("Cannot find own mod file, skipping native extraction");
                 return;
             }
             extractIfNeeded(
-                    container.getRootPaths().get(0).resolve(JAR_NATIVE_ROOT),
-                    net.minecraftforge.fml.loading.FMLPaths.GAMEDIR.get(),
-                    container.getMetadata().getVersion().getFriendlyString(),
+                    modFile.getFile().findResource(JAR_NATIVE_ROOT),
+                    FMLPaths.GAMEDIR.get(),
+                    modVersion(modFile),
                     detectPlatformSdkDir(System.getProperty("os.arch")),
                     RETIRED_SDK_CLEANUP);
         } catch (Exception e) {
             LOGGER.error("Native extraction failed; the mod may not function correctly. "
                     + "Relaunch to retry the staged payload update.", e);
         }
+    }
+
+    /** This mod's version as {@code mods.toml} declares it, which the marker embeds. */
+    private static String modVersion(IModFileInfo modFile) {
+        for (IModInfo mod : modFile.getMods()) {
+            if (RtxRemixCommonMod.MOD_ID.equals(mod.getModId())) {
+                return mod.getVersion().toString();
+            }
+        }
+        return "unknown";
     }
 
     /**
@@ -166,22 +183,22 @@ public final class NativeExtractor {
         AtomicLong totalBytes = new AtomicLong();
         AtomicInteger keptCount = new AtomicInteger();
         if (Files.exists(versionFile)) {
-            String existing = Files.readString(versionFile).stripFormatting();
+            String existing = Files.readString(versionFile).strip();
             if (markerMatches(existing, expectedMarker)) {
                 if (Files.isRegularFile(remixSdkDir.resolve("d3d9.dll"))) {
                     if (restoreMissingRtxConf(nativeRoot, gameDir)) {
-                        LOGGER.printDebugLog("Restored mod-owned {} after it was deleted since the last extraction",
+                        LOGGER.info("Restored mod-owned {} after it was deleted since the last extraction",
                                 RTX_CONF);
                     }
                     extractTextures(nativeRoot, gameDir, true, fileCount, totalBytes);
                     extractAuthorPayload(nativeRoot, gameDir, fileCount, totalBytes, keptCount);
-                    LOGGER.printDebugLog("Native runtime {} already extracted; restored {} missing payload file(s)",
+                    LOGGER.info("Native runtime {} already extracted; restored {} missing payload file(s)",
                             expectedMarker, fileCount.get());
                     return;
                 }
-                LOGGER.printDebugLog("Native runtime {} is missing, re-extracting natives", expectedMarker);
+                LOGGER.info("Native runtime {} is missing, re-extracting natives", expectedMarker);
             } else {
-                LOGGER.printDebugLog("Marker changed ({} -> {}), re-extracting natives", existing, expectedMarker);
+                LOGGER.info("Marker changed ({} -> {}), re-extracting natives", existing, expectedMarker);
             }
         }
 
@@ -226,13 +243,13 @@ public final class NativeExtractor {
                 } else if (RTX_CONF.equals(name)) {
                     Files.copy(entry, rtxConfStaging, StandardCopyOption.REPLACE_EXISTING);
                     fileCount.incrementAndGet();
-                    totalBytes.addOrGet(Files.size(entry));
+                    totalBytes.addAndGet(Files.size(entry));
                 } else {
                     Path target = gameDir.resolve(name);
-                    Files.createDirectoriesSafe(target.getParent() != null ? target.getParent() : gameDir);
+                    Files.createDirectories(target.getParent() != null ? target.getParent() : gameDir);
                     Files.copy(entry, target, StandardCopyOption.REPLACE_EXISTING);
                     fileCount.incrementAndGet();
-                    totalBytes.addOrGet(Files.size(entry));
+                    totalBytes.addAndGet(Files.size(entry));
                 }
             }
         }
@@ -249,8 +266,8 @@ public final class NativeExtractor {
             Files.move(rtxConfStaging, rtxConfFile, StandardCopyOption.REPLACE_EXISTING);
         }
 
-        Files.writeUtf(versionFile, expectedMarker);
-        LOGGER.printDebugLog("Extracted {} files ({} MB) for {} to {}{}",
+        Files.writeString(versionFile, expectedMarker);
+        LOGGER.info("Extracted {} files ({} MB) for {} to {}{}",
                 fileCount.get(),
                 totalBytes.get() / (1024 * 1024),
                 expectedMarker,
@@ -294,12 +311,12 @@ public final class NativeExtractor {
                 }
                 // Through a staging file, so an interrupted copy never leaves a
                 // truncated texture that a matching marker would then keep.
-                Files.createDirectoriesSafe(texturesDir);
+                Files.createDirectories(texturesDir);
                 Path staging = texturesDir.resolve(name + ".staging");
                 Files.copy(texture, staging, StandardCopyOption.REPLACE_EXISTING);
                 Files.move(staging, live, StandardCopyOption.REPLACE_EXISTING);
                 fileCount.incrementAndGet();
-                totalBytes.addOrGet(Files.size(live));
+                totalBytes.addAndGet(Files.size(live));
             }
         }
     }
@@ -350,13 +367,13 @@ public final class NativeExtractor {
      */
     static void extractTree(Path src, Path dst, AtomicInteger fileCount, AtomicLong totalBytes,
                             AtomicInteger keptCount) throws IOException {
-        Files.createDirectoriesSafe(dst);
+        Files.createDirectories(dst);
         Files.walkFileTree(src, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                 Path rel = src.relativize(dir);
                 if (!rel.toString().isEmpty()) {
-                    Files.createDirectoriesSafe(dst.resolve(rel.toString()));
+                    Files.createDirectories(dst.resolve(rel.toString()));
                 }
                 return FileVisitResult.CONTINUE;
             }
@@ -369,12 +386,12 @@ public final class NativeExtractor {
                     keptCount.incrementAndGet();
                     return FileVisitResult.CONTINUE;
                 }
-                Files.createDirectoriesSafe(target.getParent());
+                Files.createDirectories(target.getParent());
                 try (InputStream in = Files.newInputStream(file)) {
                     Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
                 }
                 fileCount.incrementAndGet();
-                totalBytes.addOrGet(attrs.size());
+                totalBytes.addAndGet(attrs.size());
                 return FileVisitResult.CONTINUE;
             }
         });

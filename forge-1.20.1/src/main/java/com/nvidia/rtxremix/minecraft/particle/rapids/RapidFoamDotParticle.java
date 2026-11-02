@@ -4,8 +4,6 @@
  */
 package com.nvidia.rtxremix.minecraft.particle.rapids;
 
-import net.fabricmc.api.EnvType; // PORT: Fabric API
-import net.fabricmc.api.Environment; // PORT: Fabric API
 import net.minecraft.client.particle.Particle;
 import net.minecraft.client.particle.ParticleProvider;
 import net.minecraft.client.particle.ParticleRenderType;
@@ -13,16 +11,18 @@ import net.minecraft.client.particle.TextureSheetParticle;
 import net.minecraft.client.particle.SpriteSet;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.particles.SimpleParticleType;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 
-@net.minecraftforge.api.distmarker.OnlyIn(net.minecraftforge.api.distmarker.Dist.CLIENT)
+@OnlyIn(Dist.CLIENT)
 public class RapidFoamDotParticle extends TextureSheetParticle {
     private RapidFoamDotParticle(ClientLevel world, double x, double y, double z,
                                  double velocityX, double velocityY, double velocityZ,
                                  SpriteSet spriteProvider) {
         super(world, x, y, z);
-        this.setSprite(spriteProvider);
+        this.pickSprite(spriteProvider);
         this.setSize(0.01f, 0.01f);
-        this.scale *= this.random.nextFloat() * 0.25f + 0.18f;
+        this.quadSize *= this.random.nextFloat() * 0.25f + 0.18f;
         this.lifetime = 16 + this.random.nextInt(24);
         this.gravity = 1.15f;
         this.friction = 0.94f;
@@ -33,11 +33,11 @@ public class RapidFoamDotParticle extends TextureSheetParticle {
     }
 
     @Override
-    public ParticleRenderType getType() {
+    public ParticleRenderType getRenderType() {
         return ParticleRenderType.PARTICLE_SHEET_OPAQUE;
     }
 
-    @net.minecraftforge.api.distmarker.OnlyIn(net.minecraftforge.api.distmarker.Dist.CLIENT)
+    @OnlyIn(Dist.CLIENT)
     public static final class Factory implements ParticleProvider<SimpleParticleType> {
         private final SpriteSet spriteProvider;
 

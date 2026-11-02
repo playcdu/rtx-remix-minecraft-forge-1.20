@@ -39,6 +39,7 @@ import net.minecraft.client.renderer.DimensionSpecialEffects;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 import org.slf4j.Logger;
@@ -126,11 +127,11 @@ public class SkyRenderer {
     public static void setDayAmbientBoost(float v)    { dayAmbientBoost = v; }
     public static float getMinimumCelestialWeatherVisibility()  { return minimumCelestialWeatherVisibility; }
     public static void setMinimumCelestialWeatherVisibility(float v) {
-        minimumCelestialWeatherVisibility = Math.clamp(v, 0.0f, 1.0f);
+        minimumCelestialWeatherVisibility = Mth.clamp(v, 0.0f, 1.0f);
     }
     public static float getMieScatteringAnisotropy()  { return mieScatteringAnisotropy; }
     public static void setMieScatteringAnisotropy(float v) {
-        mieScatteringAnisotropy = Math.clamp(v, 0.0f, MAX_MIE_SCATTERING_ANISOTROPY);
+        mieScatteringAnisotropy = Mth.clamp(v, 0.0f, MAX_MIE_SCATTERING_ANISOTROPY);
     }
 
     /**
@@ -256,7 +257,7 @@ public class SkyRenderer {
         float[] sunDirection;
         WeatherDomeState weather;
         try (ProfileScope ignored = ProfileScope.begin("Sky.Prepare")) {
-            skyAngle = world.getSkyAngle(tickDelta);
+            skyAngle = world.getTimeOfDay(tickDelta);
             ConfLayerDriver confLayers = renderer.getConfLayerDriver();
             ConfLayerDriver.WeatherStrengths weatherStrengths =
                     confLayers != null && confLayers.isActive()
@@ -325,6 +326,45 @@ public class SkyRenderer {
     }
 
     /**
+     * IEEE 754 binary16 encoding of {@code value}, rounded to nearest even, with
+     * {@code Float.floatToFloat16}'s results; that method is Java 20, this module targets 17.
+     */
+    static short floatToFloat16(float value) {
+        int bits = Float.floatToRawIntBits(value);
+        short sign = (short) ((bits & 0x8000_0000) >> 16);
+        if (Float.isNaN(value)) {
+            return (short) (sign | 0x7c00
+                    | (bits & 0x007f_e000) >> 13
+                    | (bits & 0x0000_1ff0) >> 4
+                    | (bits & 0x0000_000f));
+        }
+        float magnitude = Math.abs(value);
+        if (magnitude >= 0x1.ffcp15f + 0x0.002p15f) {
+            return (short) (sign | 0x7c00);
+        }
+        if (magnitude <= 0x1.0p-24f * 0.5f) {
+            return sign;
+        }
+        int exponent = Math.getExponent(value);
+        int exponentDelta = 0;
+        int implicitBit = 0;
+        if (exponent < -14) {
+            exponentDelta = -14 - exponent;
+            exponent = -15;
+            implicitBit = 0x0080_0000;
+        }
+        int significand = (bits & 0x007f_ffff) | implicitBit;
+        short halfSignificand = (short) (significand >> (13 + exponentDelta));
+        int lsb = significand & (1 << (13 + exponentDelta));
+        int round = significand & (1 << (12 + exponentDelta));
+        int sticky = significand & ((1 << (12 + exponentDelta)) - 1);
+        if (round != 0 && (lsb | sticky) != 0) {
+            halfSignificand++;
+        }
+        return (short) (sign | (((exponent + 15) << 10) + halfSignificand));
+    }
+
+    /**
      * Fills an RGBA16F equirect of the dome's resolution with one opaque radiance, leaving the
      * buffer positioned at zero with its limit on the last dome byte.
      *
@@ -335,10 +375,10 @@ public class SkyRenderer {
             throw new IllegalArgumentException(
                     "Dome buffer is smaller than " + AtmosphericSkyGenerator.OUTPUT_BYTES);
         }
-        short r = Float.floatToFloat16(radiance[0]);
-        short g = Float.floatToFloat16(radiance[1]);
-        short b = Float.floatToFloat16(radiance[2]);
-        short a = Float.floatToFloat16(1.0f);
+        short r = floatToFloat16(radiance[0]);
+        short g = floatToFloat16(radiance[1]);
+        short b = floatToFloat16(radiance[2]);
+        short a = floatToFloat16(1.0f);
         pixels.clear();
         pixels.order(ByteOrder.nativeOrder());
         pixels.limit(AtmosphericSkyGenerator.OUTPUT_BYTES);
@@ -673,7 +713,7 @@ public class SkyRenderer {
         byte[] pixels;
         int width;
         int height;
-        try (NativeImage image = NativeImage.read(resource.getInputStream())) {
+        try (NativeImage image = NativeImage.read(resource.open())) {
             width = image.getWidth();
             height = image.getHeight();
             pixels = new byte[width * height * 4];
@@ -826,7 +866,7 @@ public class SkyRenderer {
     private static float[] getVanillaStarVertices() {
         var worldRenderer = Minecraft.getInstance().levelRenderer;
         if (!(worldRenderer instanceof WorldRendererStarAccess starAccess)) {
-            throw new IllegalStateException("WorldRenderer star capture is unavailable");
+            throw new IllegalStateException("LevelRenderer star capture is unavailable");
         }
         return starAccess.rtxremix$copyStarVertices();
     }
@@ -893,9 +933,9 @@ public class SkyRenderer {
             Vec3 cameraPos,
             float skyAngle) {
         Quaternionf rotation = new Quaternionf()
-                .xRot((float) Math.toRadians(SUN_PATH_ROTATION_DEG))
-                .yRot(-(float) Math.PI / 2.0f)
-                .xRot(skyAngle * (float) (Math.PI * 2.0));
+                .rotateX((float) Math.toRadians(SUN_PATH_ROTATION_DEG))
+                .rotateY(-(float) Math.PI / 2.0f)
+                .rotateX(skyAngle * (float) (Math.PI * 2.0));
         Transform rotated = Transform.fromTRS(
                 (float) cameraPos.x,
                 (float) cameraPos.y,
@@ -999,7 +1039,7 @@ public class SkyRenderer {
      * Computes the sun's position direction from Minecraft's {@code skyAngle},
      * with the standard shader-pack tilt applied.
      *
-     * @param skyAngle {@code world.getSkyAngle(tickDelta)}: 0.0 at noon, 0.25 at sunset, etc.
+     * @param skyAngle {@code world.getTimeOfDay(tickDelta)}: 0.0 at noon, 0.25 at sunset, etc.
      * @return float[3] {x, y, z} normalised sun position direction
      */
     public static float[] computeSunDirection(float skyAngle) {

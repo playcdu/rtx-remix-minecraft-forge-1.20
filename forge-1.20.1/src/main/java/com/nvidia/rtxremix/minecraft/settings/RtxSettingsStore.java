@@ -59,7 +59,7 @@ public final class RtxSettingsStore {
                 return;
             }
             if (file.getParent() != null) {
-                Files.createDirectoriesSafe(file.getParent());
+                Files.createDirectories(file.getParent());
             }
             try (Writer w = new OutputStreamWriter(Files.newOutputStream(file), StandardCharsets.UTF_8)) {
                 GSON.toJson(root, w);

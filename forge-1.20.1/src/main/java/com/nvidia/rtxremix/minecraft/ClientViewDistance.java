@@ -22,7 +22,7 @@ public final class ClientViewDistance {
     public static int chunks() {
         Minecraft client = Minecraft.getInstance();
         if (client != null && client.options != null) {
-            return client.options.getViewDistance().getValue();
+            return client.options.renderDistance().get();
         }
         return FALLBACK_CHUNKS;
     }

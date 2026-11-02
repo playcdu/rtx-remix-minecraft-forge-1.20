@@ -15,7 +15,7 @@ import net.minecraft.client.renderer.RenderType;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.ItemInHandRenderer;
-import net.minecraft.client.util.BufferAllocator; // PORT: no 1.20.1 equivalent
+import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.InteractionHand;
@@ -98,14 +98,14 @@ public final class RemixFirstPersonPass implements AutoCloseable {
             modelView.invert(inverseModelView).transformPosition(eye.set(0.0f, 0.0f, 0.0f));
             context.setEye(eye.x, eye.y, eye.z);
 
-            heldItemRenderer.renderItem(tickDelta, matrices, immediate, player, light);
+            heldItemRenderer.renderHandsWithItems(tickDelta, matrices, immediate, player, light);
 
             List<RemixVertexConsumerProvider.CapturedLayer> layers = provider.endEntity();
-            if (layers.clear()) {
+            if (layers.isEmpty()) {
                 return;
             }
 
-            Camera camera = client.gameRenderer.getCamera();
+            Camera camera = client.gameRenderer.getMainCamera();
             float fovScale = calculateFovScale(client, camera, tickDelta);
             setViewCorrection(viewCorrection, modelView, fovScale);
 
@@ -322,23 +322,23 @@ public final class RemixFirstPersonPass implements AutoCloseable {
     }
 
     /**
-     * ItemInHandRenderer requires an Immediate provider because it flushes it at
-     * the end of the hand render. This adapter exposes the Remix capture
-     * provider while making those raster flushes no-ops.
+     * {@code ItemInHandRenderer.renderHandsWithItems} requires a
+     * {@code MultiBufferSource.BufferSource} because it flushes it at the end of the hand
+     * render. This adapter exposes the Remix capture provider while making those raster
+     * flushes no-ops.
+     *
+     * <p>1.20.1's {@code BufferSource} takes a {@link BufferBuilder} rather than 1.21's
+     * closeable allocator. The minimal builder handed to the superclass is never written,
+     * since every buffer request is answered by the capture provider. 1.20.1's builder
+     * offers no way to free its small native buffer, so {@link #close()} has no work; the
+     * pass is created once per renderer, so that is one 1.5 KB buffer per renderer.
      */
     private static final class CapturingImmediate extends MultiBufferSource.BufferSource
             implements AutoCloseable {
-        private final BufferAllocator ownedAllocator;
         private final RemixVertexConsumerProvider captureProvider;
 
         private CapturingImmediate(RemixVertexConsumerProvider captureProvider) {
-            this(new BufferAllocator(256), captureProvider);
-        }
-
-        private CapturingImmediate(BufferAllocator allocator,
-                                   RemixVertexConsumerProvider captureProvider) {
-            super(allocator, new LinkedHashMap<>());
-            this.ownedAllocator = allocator;
+            super(new BufferBuilder(256), new LinkedHashMap<>());
             this.captureProvider = captureProvider;
         }
 
@@ -348,20 +348,19 @@ public final class RemixFirstPersonPass implements AutoCloseable {
         }
 
         @Override
-        public void drawCurrentLayer() {
+        public void endLastBatch() {
         }
 
         @Override
-        public void draw() {
+        public void endBatch() {
         }
 
         @Override
-        public void draw(RenderType layer) {
+        public void endBatch(RenderType layer) {
         }
 
         @Override
         public void close() {
-            ownedAllocator.close();
         }
     }
 }

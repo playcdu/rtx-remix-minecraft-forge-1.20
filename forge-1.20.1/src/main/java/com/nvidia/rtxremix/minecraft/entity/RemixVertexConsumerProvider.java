@@ -4,10 +4,14 @@
  */
 package com.nvidia.rtxremix.minecraft.entity;
 
-import net.minecraft.client.renderer.RenderType;
+import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.resources.ResourceLocation;
+import org.joml.Matrix3f;
+import org.joml.Matrix4f;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -106,8 +110,8 @@ public class RemixVertexConsumerProvider implements MultiBufferSource {
             textureId = texOpt.get();
         } else if (RenderLayerUtils.isCapturableUntexturedLayer(layer)) {
             // Shaded entirely by vertex colour, so it needs an identity to hang a
-            // material on but no texture of its own. In 1.21.1 the lead is the only
-            // layer that reaches this.
+            // material on but no texture of its own. In 1.20.1, as in 1.21.1, the
+            // lead is the only layer that reaches this.
             textureId = RenderLayerUtils.UNTEXTURED_LAYER_ID;
         } else {
             // Nothing Remix can draw: shadow, debug overlays, lines, depth-only masks,
@@ -173,11 +177,23 @@ public class RemixVertexConsumerProvider implements MultiBufferSource {
 
     private static class NoOpVertexConsumer implements VertexConsumer {
         static final NoOpVertexConsumer INSTANCE = new NoOpVertexConsumer();
-        @Override public VertexConsumer vertex(float x, float y, float z) { return this; }
+        @Override public VertexConsumer vertex(double x, double y, double z) { return this; }
         @Override public VertexConsumer color(int r, int g, int b, int a) { return this; }
         @Override public VertexConsumer uv(float u, float v) { return this; }
         @Override public VertexConsumer overlayCoords(int u, int v) { return this; }
-        @Override public VertexConsumer light(int u, int v) { return this; }
+        @Override public VertexConsumer uv2(int u, int v) { return this; }
         @Override public VertexConsumer normal(float x, float y, float z) { return this; }
+        @Override public void endVertex() { }
+        @Override public void defaultColor(int r, int g, int b, int a) { }
+        @Override public void unsetDefaultColor() { }
+        // The defaults below would transform and allocate only to discard the result.
+        @Override public VertexConsumer vertex(Matrix4f matrix, float x, float y, float z) { return this; }
+        @Override public VertexConsumer normal(Matrix3f matrix, float x, float y, float z) { return this; }
+        @Override public void vertex(float x, float y, float z, float r, float g, float b, float a,
+                                     float u, float v, int overlay, int light,
+                                     float nx, float ny, float nz) { }
+        @Override public void putBulkData(PoseStack.Pose pose, BakedQuad quad, float[] brightness,
+                                          float r, float g, float b, float a, int[] lights,
+                                          int overlay, boolean readExistingColor) { }
     }
 }

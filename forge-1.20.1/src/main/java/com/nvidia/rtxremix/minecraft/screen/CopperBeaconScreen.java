@@ -14,8 +14,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.function.DoubleUnaryOperator;
 import java.util.function.Function;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking; // PORT: Fabric API
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.components.Checkbox;
@@ -25,6 +26,10 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
+import java.util.function.Consumer;
+import net.minecraft.client.gui.Font;
+import com.mojang.blaze3d.systems.RenderSystem;
 
 /** Minecraft-style per-block controls for the Copper Beacon. */
 public final class CopperBeaconScreen extends AbstractContainerScreen<CopperBeaconScreenHandler> {
@@ -38,7 +43,15 @@ public final class CopperBeaconScreen extends AbstractContainerScreen<CopperBeac
     private static final int RANGE_SLIDER_GAP = 6;
     private static final int RANGE_SLIDER_WIDTH =
             (PANEL_WIDTH - RANGE_SLIDER_GAP) / 2;
-    private static final ResourceLocation SLOT_TEXTURE = new ResourceLocation("container/slot");
+    /**
+     * 1.20.1 has no GUI sprite atlas (1.21's {@code container/slot} sprite), so
+     * the slot frame is cut from the generic container background, where the
+     * first slot's 18x18 frame starts at (7, 17).
+     */
+    private static final ResourceLocation SLOT_TEXTURE =
+            new ResourceLocation("textures/gui/container/generic_54.png");
+    private static final int SLOT_TEXTURE_U = 7;
+    private static final int SLOT_TEXTURE_V = 17;
 
     private final Map<CopperBeaconUpdatePayload.Field, Float> pending =
             new EnumMap<>(CopperBeaconUpdatePayload.Field.class);
@@ -46,12 +59,12 @@ public final class CopperBeaconScreen extends AbstractContainerScreen<CopperBeac
     public CopperBeaconScreen(
             CopperBeaconScreenHandler handler, Inventory inventory, Component title) {
         super(handler, inventory, title);
-        backgroundWidth = CopperBeaconScreenHandler.WIDTH;
-        backgroundHeight = BACKGROUND_HEIGHT;
-        playerInventoryTitleX = CopperBeaconScreenHandler.PLAYER_INVENTORY_X;
-        playerInventoryTitleY = CopperBeaconScreenHandler.PLAYER_INVENTORY_Y - 12;
-        titleX = 8;
-        titleY = 6;
+        imageWidth = CopperBeaconScreenHandler.WIDTH;
+        imageHeight = BACKGROUND_HEIGHT;
+        inventoryLabelX = CopperBeaconScreenHandler.PLAYER_INVENTORY_X;
+        inventoryLabelY = CopperBeaconScreenHandler.PLAYER_INVENTORY_Y - 12;
+        titleLabelX = 8;
+        titleLabelY = 6;
     }
 
     @Override
@@ -59,21 +72,21 @@ public final class CopperBeaconScreen extends AbstractContainerScreen<CopperBeac
         super.init();
         // A side-mounted panel leaves the crosshair area unobstructed so the
         // articulated beacon remains visible while its controls are adjusted.
-        if (width >= backgroundWidth + 16) {
-            x = 8;
+        if (width >= imageWidth + 16) {
+            leftPos = 8;
         }
         buildControls();
     }
 
     private void buildControls() {
-        CopperBeaconBlockEntity beacon = handler.getBeacon();
+        CopperBeaconBlockEntity beacon = menu.getBeacon();
         if (beacon == null) {
             return;
         }
 
         addSlider(
-                x + 56,
-                y + 17,
+                leftPos + 56,
+                topPos + 17,
                 94,
                 "container.rtxremix.copper_beacon.saturation",
                 beacon.getSaturation(),
@@ -82,22 +95,21 @@ public final class CopperBeaconScreen extends AbstractContainerScreen<CopperBeac
                 value -> Component.literal(String.format(Locale.ROOT, "%.0f%%", value * 100.0)),
                 CopperBeaconUpdatePayload.Field.SATURATION);
 
-        addDrawableChild(Checkbox.builder(
-                        Component.translatable(
-                                "container.rtxremix.copper_beacon.redstone"),
-                        textRenderer)
-                .pos(x + 158, y + 17)
-                .checked(beacon.isRedstoneControlled())
-                .withTooltip(Tooltip.create(Component.translatable(
-                        "container.rtxremix.copper_beacon.redstone.tip")))
-                .callback((checkbox, checked) -> queue(
+        BeaconCheckbox redstone = new BeaconCheckbox(
+                leftPos + 158,
+                topPos + 17,
+                Component.translatable("container.rtxremix.copper_beacon.redstone"),
+                beacon.isRedstoneControlled(),
+                checked -> queue(
                         CopperBeaconUpdatePayload.Field.REDSTONE_CONTROLLED,
-                        checked ? 1.0f : 0.0f))
-                .build());
+                        checked ? 1.0f : 0.0f));
+        redstone.setTooltip(Tooltip.create(Component.translatable(
+                "container.rtxremix.copper_beacon.redstone.tip")));
+        addRenderableWidget(redstone);
 
         addSlider(
-                x + OUTER_MARGIN,
-                y + 36,
+                leftPos + OUTER_MARGIN,
+                topPos + 36,
                 118,
                 "container.rtxremix.copper_beacon.intensity",
                 beacon.getIntensityMultiplier(),
@@ -108,8 +120,8 @@ public final class CopperBeaconScreen extends AbstractContainerScreen<CopperBeac
                         : Component.literal(String.format(Locale.ROOT, "%.2f\u00d7", value)),
                 CopperBeaconUpdatePayload.Field.INTENSITY);
         addSlider(
-                x + 134,
-                y + 36,
+                leftPos + 134,
+                topPos + 36,
                 118,
                 "container.rtxremix.copper_beacon.cone",
                 beacon.getConeAngle(),
@@ -119,13 +131,13 @@ public final class CopperBeaconScreen extends AbstractContainerScreen<CopperBeac
                 CopperBeaconUpdatePayload.Field.CONE_ANGLE);
 
         addAxisControls(
-                x + OUTER_MARGIN,
-                y + 54,
+                leftPos + OUTER_MARGIN,
+                topPos + 54,
                 beacon.getYaw(),
                 true);
         addAxisControls(
-                x + OUTER_MARGIN + PANEL_WIDTH + PANEL_GAP,
-                y + 54,
+                leftPos + OUTER_MARGIN + PANEL_WIDTH + PANEL_GAP,
+                topPos + 54,
                 beacon.getPitch(),
                 false);
     }
@@ -151,11 +163,11 @@ public final class CopperBeaconScreen extends AbstractContainerScreen<CopperBeac
                         ? CopperBeaconUpdatePayload.Field.YAW_POSITION
                         : CopperBeaconUpdatePayload.Field.PITCH_POSITION);
 
-        addDrawableChild(CycleButton
+        addRenderableWidget(CycleButton
                 .<CopperBeaconAnimationMode>builder(CopperBeaconScreen::modeText)
-                .withValues(CopperBeaconAnimationMode.withValues())
+                .withValues(CopperBeaconAnimationMode.values())
                 .withInitialValue(state.mode())
-                .build(
+                .create(
                         panelX,
                         panelY + 29,
                         PANEL_WIDTH,
@@ -235,7 +247,7 @@ public final class CopperBeaconScreen extends AbstractContainerScreen<CopperBeac
     }
 
     private void rebuildControls() {
-        clearChildren();
+        clearWidgets();
         buildControls();
     }
 
@@ -249,31 +261,36 @@ public final class CopperBeaconScreen extends AbstractContainerScreen<CopperBeac
             DoubleUnaryOperator fromSlider,
             Function<Double, Component> valueText,
             CopperBeaconUpdatePayload.Field field) {
-        addDrawableChild(new BeaconSlider(
+        addRenderableWidget(new BeaconSlider(
                 x,
                 y,
                 width,
                 Component.translatable(labelKey),
                 Component.translatable(labelKey + ".tip"),
-                Math.clamp(toSlider.applyAsDouble(current), 0.0, 1.0),
+                Mth.clamp(toSlider.applyAsDouble(current), 0.0, 1.0),
                 fromSlider,
                 valueText,
-                value -> queue(field, value.getAsFloat()),
+                value -> queue(field, value.floatValue()),
                 this::flushPending));
     }
 
     private void queue(CopperBeaconUpdatePayload.Field field, float value) {
-        handler.applyUpdate(field, value);
+        menu.applyUpdate(field, value);
         pending.put(field, value);
     }
 
     private void flushPending() {
-        if (!ClientPlayNetworking.canSend(CopperBeaconUpdatePayload.ID)) {
+        if (pending.isEmpty()) {
+            return;
+        }
+        ClientPacketListener connection = Minecraft.getInstance().getConnection();
+        if (connection == null
+                || !CopperBeaconUpdatePayload.canSend(connection.getConnection())) {
             pending.clear();
             return;
         }
-        pending.forEach((field, value) -> ClientPlayNetworking.send(
-                new CopperBeaconUpdatePayload(handler.syncId, field, value)));
+        pending.forEach((field, value) -> CopperBeaconUpdatePayload.send(
+                new CopperBeaconUpdatePayload(menu.containerId, field, value)));
         pending.clear();
     }
 
@@ -291,19 +308,24 @@ public final class CopperBeaconScreen extends AbstractContainerScreen<CopperBeac
 
     @Override
     public void render(GuiGraphics context, int mouseX, int mouseY, float delta) {
+        // 1.21.1's Screen.render draws the in-game background itself; 1.20.1
+        // leaves it to each screen.
+        renderBackground(context);
         super.render(context, mouseX, mouseY, delta);
-        drawMouseoverTooltip(context, mouseX, mouseY);
+        renderTooltip(context, mouseX, mouseY);
     }
 
     @Override
     protected void renderBg(
             GuiGraphics context, float delta, int mouseX, int mouseY) {
-        context.renderOutline(x, y, backgroundWidth, backgroundHeight, 0xFF8B8B8B);
-        for (var slot : handler.slots) {
-            context.drawGuiTexture(
+        context.renderOutline(leftPos, topPos, imageWidth, imageHeight, 0xFF8B8B8B);
+        for (var slot : menu.slots) {
+            context.blit(
                     SLOT_TEXTURE,
-                    x + slot.x - 1,
-                    y + slot.y - 1,
+                    leftPos + slot.x - 1,
+                    topPos + slot.y - 1,
+                    SLOT_TEXTURE_U,
+                    SLOT_TEXTURE_V,
                     18,
                     18);
         }
@@ -312,35 +334,35 @@ public final class CopperBeaconScreen extends AbstractContainerScreen<CopperBeac
     @Override
     protected void renderLabels(GuiGraphics context, int mouseX, int mouseY) {
         context.drawString(
-                textRenderer,
+                font,
                 title,
-                titleX,
-                titleY,
+                titleLabelX,
+                titleLabelY,
                 0xFFE0E0E0,
                 false);
         context.drawString(
-                textRenderer,
+                font,
                 playerInventoryTitle,
-                playerInventoryTitleX,
-                playerInventoryTitleY,
+                inventoryLabelX,
+                inventoryLabelY,
                 0xFFE0E0E0,
                 false);
         context.drawString(
-                textRenderer,
+                font,
                 Component.translatable("container.rtxremix.copper_beacon.yaw"),
                 OUTER_MARGIN,
                 55,
                 0xFFE0E0E0,
                 false);
         context.drawString(
-                textRenderer,
+                font,
                 Component.translatable("container.rtxremix.copper_beacon.pitch"),
                 OUTER_MARGIN + PANEL_WIDTH + PANEL_GAP,
                 55,
                 0xFFE0E0E0,
                 false);
         context.drawString(
-                textRenderer,
+                font,
                 Component.translatable("container.rtxremix.copper_beacon.dye"),
                 OUTER_MARGIN,
                 22,
@@ -351,7 +373,7 @@ public final class CopperBeaconScreen extends AbstractContainerScreen<CopperBeac
     private static Component modeText(CopperBeaconAnimationMode mode) {
         return Component.translatable(
                 "container.rtxremix.copper_beacon.mode."
-                        + mode.name().lowercaseVariant(Locale.ROOT));
+                        + mode.name().toLowerCase(Locale.ROOT));
     }
 
     static double intensityToSlider(double value) {
@@ -420,6 +442,71 @@ public final class CopperBeaconScreen extends AbstractContainerScreen<CopperBeac
         void accept(Double value);
     }
 
+    /**
+     * 1.21.1's checkbox builder, rebuilt on 1.20.1's {@link Checkbox}: a box
+     * sized to the font ({@code fontHeight + 8}, as 1.21.1 sizes it) rather
+     * than 1.20.1's fixed 20 pixels, so it sits in the same 16-pixel control
+     * row, and a callback after each toggle.
+     */
+    private static final class BeaconCheckbox extends Checkbox {
+        private static final ResourceLocation TEXTURE =
+                new ResourceLocation("textures/gui/checkbox.png");
+        private static final int TEXTURE_BOX = 20;
+        private static final int TEXTURE_SIZE = 64;
+        private static final int LABEL_GAP = 4;
+        private static final int TEXT_COLOR = 0xE0E0E0;
+
+        private final Consumer<Boolean> callback;
+
+        private BeaconCheckbox(
+                int x, int y, Component label, boolean checked, Consumer<Boolean> callback) {
+            super(x, y,
+                    boxSize() + LABEL_GAP + Minecraft.getInstance().font.width(label),
+                    boxSize(),
+                    label,
+                    checked);
+            this.callback = callback;
+        }
+
+        private static int boxSize() {
+            return Minecraft.getInstance().font.lineHeight + 8;
+        }
+
+        @Override
+        public void onPress() {
+            super.onPress();
+            callback.accept(selected());
+        }
+
+        @Override
+        public void renderWidget(GuiGraphics context, int mouseX, int mouseY, float delta) {
+            Font font = Minecraft.getInstance().font;
+            int box = height;
+            RenderSystem.enableDepthTest();
+            context.setColor(1.0f, 1.0f, 1.0f, alpha);
+            RenderSystem.enableBlend();
+            context.blit(
+                    TEXTURE,
+                    getX(),
+                    getY(),
+                    box,
+                    box,
+                    isFocused() ? TEXTURE_BOX : 0.0f,
+                    selected() ? TEXTURE_BOX : 0.0f,
+                    TEXTURE_BOX,
+                    TEXTURE_BOX,
+                    TEXTURE_SIZE,
+                    TEXTURE_SIZE);
+            context.setColor(1.0f, 1.0f, 1.0f, 1.0f);
+            context.drawString(
+                    font,
+                    getMessage(),
+                    getX() + box + LABEL_GAP,
+                    getY() + (box - font.lineHeight + 1) / 2,
+                    TEXT_COLOR | Mth.ceil(alpha * 255.0f) << 24);
+        }
+    }
+
     private static final class BeaconSlider extends AbstractSliderButton {
         private final Component label;
         private final DoubleUnaryOperator fromSlider;
@@ -451,7 +538,7 @@ public final class CopperBeaconScreen extends AbstractContainerScreen<CopperBeac
         @Override
         protected void updateMessage() {
             double actual = fromSlider.applyAsDouble(value);
-            setMessage(CommonComponents.composeGenericOptionText(label, valueText.apply(actual)));
+            setMessage(CommonComponents.optionNameValue(label, valueText.apply(actual)));
         }
 
         @Override

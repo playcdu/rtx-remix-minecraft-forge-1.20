@@ -207,7 +207,7 @@ public final class RtxSettingsFactory {
                 BlockTextureManager.MAX_TERRAIN_EMISSION_MULTIPLIER,
                 BlockTextureManager.DEFAULT_TERRAIN_EMISSION_MULTIPLIER,
                 () -> (double) textures.getTerrainEmissionMultiplier(),
-                value -> textures.setTerrainEmissionMultiplier(value.getAsFloat())));
+                value -> textures.setTerrainEmissionMultiplier(value.floatValue())));
         RemixAPI remix = renderer.getRemixApi();
         remixBool("materials.smoothReliefMaps", SettingGroup.MATERIALS,
                 "rtxremix.setting.materials.smoothReliefMaps",
@@ -262,7 +262,7 @@ public final class RtxSettingsFactory {
             BiConsumer<String, String> configWriter) {
         boolean[] value = new boolean[1];
         try {
-            value[0] = Boolean.get(configReader.apply(option));
+            value[0] = Boolean.parseBoolean(configReader.apply(option));
         } catch (RemixException e) {
             LOGGER.warn("Remix option {} is unavailable in this runtime, so the {} setting is hidden",
                     option, id, e);
@@ -283,7 +283,7 @@ public final class RtxSettingsFactory {
                 min, max, getter.get(),
                 () -> (double) getter.get(),
                 v -> {
-                    setter.accept(v.getAsFloat());
+                    setter.accept(v.floatValue());
                     if (renderer.getSkyRenderer() != null) {
                         renderer.getSkyRenderer().forceRefresh();
                     }
@@ -294,7 +294,7 @@ public final class RtxSettingsFactory {
             double min, double max,
             Supplier<Float> getter, Consumer<Float> setter) {
         return RtxSetting.ofFloat(id, group, labelKey, labelKey + ".tip", min, max, getter.get(),
-                () -> (double) getter.get(), v -> setter.accept(v.getAsFloat()));
+                () -> (double) getter.get(), v -> setter.accept(v.floatValue()));
     }
 
 }

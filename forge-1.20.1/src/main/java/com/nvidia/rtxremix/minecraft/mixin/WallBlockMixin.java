@@ -14,6 +14,15 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+/**
+ * Lets walls connect to a Copper Beacon mounted on their side and raise their
+ * post under one mounted on top. Common side: wall shapes are computed on the
+ * server too.
+ *
+ * <p>Tests the block's class rather than {@code CopperBeaconBlock.INSTANCE.get()}:
+ * on a server without this mod Forge drops the block from the synced registry
+ * and the registry object becomes empty, and walls are shaped constantly.
+ */
 @Mixin(WallBlock.class)
 abstract class WallBlockMixin {
 
@@ -23,9 +32,9 @@ abstract class WallBlockMixin {
             boolean faceFullSquare,
             Direction side,
             CallbackInfoReturnable<Boolean> callback) {
-        if (state.isOf(CopperBeaconBlock.INSTANCE)) {
+        if (state.getBlock() instanceof CopperBeaconBlock) {
             callback.setReturnValue(
-                    state.get(CopperBeaconBlock.MOUNT) == side.getOpposite());
+                    state.getValue(CopperBeaconBlock.MOUNT) == side.getOpposite());
         }
     }
 
@@ -35,9 +44,9 @@ abstract class WallBlockMixin {
             BlockState aboveState,
             VoxelShape aboveShape,
             CallbackInfoReturnable<Boolean> callback) {
-        if (aboveState.isOf(CopperBeaconBlock.INSTANCE)) {
+        if (aboveState.getBlock() instanceof CopperBeaconBlock) {
             callback.setReturnValue(
-                    aboveState.get(CopperBeaconBlock.MOUNT) == Direction.UP);
+                    aboveState.getValue(CopperBeaconBlock.MOUNT) == Direction.UP);
         }
     }
 }

@@ -38,17 +38,17 @@ public final class CopperBeaconBlockEntityRenderer
     public static final ModelLayerLocation LENS_MODEL_LAYER = new ModelLayerLocation(
             new ResourceLocation(RtxRemixCommonMod.MOD_ID, "copper_beacon"), "lens");
     private static final Material COPPER_TEXTURE = new Material(
-            InventoryMenu.BLOCK_ATLAS_TEXTURE,
+            InventoryMenu.BLOCK_ATLAS,
             new ResourceLocation("block/copper_block"));
     static final ResourceLocation LENS_SPRITE_ID =
             new ResourceLocation(RtxRemixCommonMod.MOD_ID, "block/copper_beacon_lens");
     static final ResourceLocation UNLIT_LENS_SPRITE_ID =
             new ResourceLocation(RtxRemixCommonMod.MOD_ID, "block/copper_beacon_lens_unlit");
     private static final Material LENS_TEXTURE = new Material(
-            InventoryMenu.BLOCK_ATLAS_TEXTURE,
+            InventoryMenu.BLOCK_ATLAS,
             LENS_SPRITE_ID);
     private static final Material UNLIT_LENS_TEXTURE = new Material(
-            InventoryMenu.BLOCK_ATLAS_TEXTURE,
+            InventoryMenu.BLOCK_ATLAS,
             UNLIT_LENS_SPRITE_ID);
 
     private final ModelPart yoke;
@@ -96,8 +96,8 @@ public final class CopperBeaconBlockEntityRenderer
                         .texOffs(0, 0).addBox(0.0f, 3.0f, -4.0f, 4.0f, 1.0f, 1.0f)
                         .texOffs(0, 0).addBox(-4.0f, -3.0f, -4.0f, 1.0f, 6.0f, 1.0f)
                         .texOffs(0, 0).addBox(3.0f, -3.0f, -4.0f, 1.0f, 6.0f, 1.0f),
-                PartPose.NONE);
-        return LayerDefinition.of(modelData, 16, 16);
+                PartPose.ZERO);
+        return LayerDefinition.create(modelData, 16, 16);
     }
 
     public static LayerDefinition getLensTexturedModelData() {
@@ -108,7 +108,7 @@ public final class CopperBeaconBlockEntityRenderer
                 CubeListBuilder.create()
                         .texOffs(0, 0).addBox(-3.0f, -3.0f, -4.01f, 6.0f, 6.0f, 0.0f),
                 PartPose.offset(8.0f, 10.0f, 8.0f));
-        return LayerDefinition.of(modelData, 6, 6);
+        return LayerDefinition.create(modelData, 6, 6);
     }
 
     @Override
@@ -119,11 +119,11 @@ public final class CopperBeaconBlockEntityRenderer
             MultiBufferSource vertexConsumers,
             int light,
             int overlay) {
-        BlockState state = beacon.getCachedState();
-        Direction up = state.get(CopperBeaconBlock.MOUNT);
-        Direction forward = state.get(BlockStateProperties.FACING);
+        BlockState state = beacon.getBlockState();
+        Direction up = state.getValue(CopperBeaconBlock.MOUNT);
+        Direction forward = state.getValue(BlockStateProperties.FACING);
         double animationTick = CopperBeaconAnimationClock.sample(
-                beacon.getWorld(), tickDelta);
+                beacon.getLevel(), tickDelta);
 
         matrices.pushPose();
         matrices.translate(0.5, 0.5, 0.5);
@@ -133,7 +133,7 @@ public final class CopperBeaconBlockEntityRenderer
                 beacon.yawAngleAt(animationTick),
                 beacon.pitchAngleAt(animationTick),
                 pose);
-        matrices.rotateAround(pose.mountingRotation());
+        matrices.mulPose(pose.mountingRotation());
         matrices.translate(-0.5, -0.5, -0.5);
 
         applyArticulation(yoke, head, lens, pose);
@@ -145,7 +145,13 @@ public final class CopperBeaconBlockEntityRenderer
                 lensTexture(beacon.isActive(), beacon.getIntensityMultiplier());
         VertexConsumer lensVertices =
                 lensTexture.buffer(vertexConsumers, RenderType::entitySolid);
-        lens.render(matrices, lensVertices, light, overlay, beacon.getLensTint());
+        // 1.20.1's ModelPart takes the tint as four floats rather than packed ARGB.
+        int tint = beacon.getLensTint();
+        lens.render(matrices, lensVertices, light, overlay,
+                ((tint >> 16) & 0xFF) / 255.0f,
+                ((tint >> 8) & 0xFF) / 255.0f,
+                (tint & 0xFF) / 255.0f,
+                ((tint >>> 24) & 0xFF) / 255.0f);
         matrices.popPose();
     }
 
@@ -159,12 +165,12 @@ public final class CopperBeaconBlockEntityRenderer
             ModelPart head,
             ModelPart lens,
             CopperBeaconPose.Pose pose) {
-        yoke.yaw = pose.modelYawRadians();
-        yoke.pitch = 0.0f;
-        head.yaw = 0.0f;
-        head.pitch = pose.modelPitchRadians();
-        lens.yaw = pose.modelYawRadians();
-        lens.pitch = pose.modelPitchRadians();
+        yoke.yRot = pose.modelYawRadians();
+        yoke.xRot = 0.0f;
+        head.yRot = 0.0f;
+        head.xRot = pose.modelPitchRadians();
+        lens.yRot = pose.modelYawRadians();
+        lens.xRot = pose.modelPitchRadians();
     }
 
     static Material lensTexture(boolean active, float intensityMultiplier) {
@@ -180,6 +186,10 @@ public final class CopperBeaconBlockEntityRenderer
     /**
      * Keeps resource-pack details along the texture edges while excluding all
      * four corners, where stylized copper textures commonly place rivets.
+     *
+     * <p>Sits outside the sprite wrapper, so {@code CuboidMixin} does not see through it
+     * and the yoke's cubes arrive as {@code ModelPart.Cube.compile}'s bulk vertices,
+     * which vanilla's default expands into the chained calls forwarded here.
      */
     private static final class VerticalUvStripConsumer implements VertexConsumer {
         private VertexConsumer delegate;
@@ -190,7 +200,7 @@ public final class CopperBeaconBlockEntityRenderer
         }
 
         @Override
-        public VertexConsumer vertex(float x, float y, float z) {
+        public VertexConsumer vertex(double x, double y, double z) {
             delegate.vertex(x, y, z);
             return this;
         }
@@ -214,8 +224,8 @@ public final class CopperBeaconBlockEntityRenderer
         }
 
         @Override
-        public VertexConsumer light(int u, int v) {
-            delegate.light(u, v);
+        public VertexConsumer uv2(int u, int v) {
+            delegate.uv2(u, v);
             return this;
         }
 
@@ -223,6 +233,21 @@ public final class CopperBeaconBlockEntityRenderer
         public VertexConsumer normal(float x, float y, float z) {
             delegate.normal(x, y, z);
             return this;
+        }
+
+        @Override
+        public void endVertex() {
+            delegate.endVertex();
+        }
+
+        @Override
+        public void defaultColor(int red, int green, int blue, int alpha) {
+            delegate.defaultColor(red, green, blue, alpha);
+        }
+
+        @Override
+        public void unsetDefaultColor() {
+            delegate.unsetDefaultColor();
         }
     }
 }

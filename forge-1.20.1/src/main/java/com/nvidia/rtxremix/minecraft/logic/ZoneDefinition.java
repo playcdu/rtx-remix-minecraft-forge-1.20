@@ -195,7 +195,7 @@ public final class ZoneDefinition {
     }
 
     public static ZoneDefinition parse(String spec, double defaultX, double defaultY, double defaultZ) {
-        String[] tokens = spec.stripFormatting().split("\\s+");
+        String[] tokens = spec.strip().split("\\s+");
         int i = 0;
         if (i < tokens.length && tokens[i].startsWith("/")) {
             tokens[i] = tokens[i].substring(1);
@@ -219,7 +219,7 @@ public final class ZoneDefinition {
 
         i = 4;
         while (i < tokens.length) {
-            String flag = tokens[i].lowercaseVariant(Locale.ROOT);
+            String flag = tokens[i].toLowerCase(Locale.ROOT);
             switch (flag) {
                 case "--center" -> {
                     rejectDuplicate(centerSpecified, flag);
@@ -345,7 +345,7 @@ public final class ZoneDefinition {
     }
 
     private static boolean containsWhitespace(String value) {
-        return value.codePoints().contains(Character::isWhitespace);
+        return value.codePoints().anyMatch(Character::isWhitespace);
     }
 
     private static void requireFinite(String fields, double... values) {

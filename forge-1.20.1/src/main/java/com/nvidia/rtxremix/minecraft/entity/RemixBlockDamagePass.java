@@ -13,6 +13,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.client.ForgeHooksClient;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.slf4j.Logger;
@@ -24,7 +25,7 @@ import java.util.List;
  * Captures the block-breaking crack where vanilla draws it and submits it through the
  * entity submitter as a decal over the terrain.
  *
- * <p>{@code WorldRendererMixin} wraps vanilla's {@code BlockRenderManager.renderDamage}
+ * <p>{@code WorldRendererMixin} wraps vanilla's {@code BlockRenderDispatcher.renderBreakingTexture}
  * call and routes it to {@code RemixRenderer.renderBlockDamageInPlace}, which calls
  * {@link #capture}. The block model is rendered on this pass's identity
  * {@link RecyclingMatrixStack} rather than vanilla's camera-relative one, so the captured
@@ -85,7 +86,7 @@ public final class RemixBlockDamagePass {
         List<RemixVertexConsumerProvider.CapturedLayer> layers;
         try {
             VertexConsumer crack = provider.getBuffer(
-                    ModelBakery.BLOCK_DESTRUCTION_RENDER_LAYERS.get(stage));
+                    ModelBakery.DESTROY_TYPES.get(stage));
             call.render(matrices, projector.target(crack));
             layers = provider.endEntity();
         } catch (Exception e) {
@@ -97,7 +98,7 @@ public final class RemixBlockDamagePass {
             matrices.reset();
             ctx.reset();
         }
-        if (layers.clear()) {
+        if (layers.isEmpty()) {
             return;
         }
 
@@ -153,8 +154,8 @@ public final class RemixBlockDamagePass {
         }
 
         void endFrame() {
-            if (!owners.clear()) {
-                owners.values().removeAll(owner -> owner.lastSeenFrame != frame);
+            if (!owners.isEmpty()) {
+                owners.values().removeIf(owner -> owner.lastSeenFrame != frame);
             }
             frame++;
         }
@@ -166,19 +167,23 @@ public final class RemixBlockDamagePass {
 
     /**
      * Projects the crack texture onto a block's faces the way vanilla's
-     * {@code OverlayVertexConsumer} does for an identity pose: the block-local position,
-     * rotated into the frame of the face its normal selects, is the texture coordinate,
-     * and the model's own atlas coordinates and shaded colour are discarded.
+     * {@code SheetedDecalTextureGenerator} does for an identity pose: the block-local
+     * position, rotated into the frame of the face its normal selects, is the texture
+     * coordinate, and the model's own atlas coordinates and shaded colour are discarded.
      *
-     * <p>Vanilla's consumer is not reused because it hands its delegate the normal before
-     * the texture coordinate, and {@link RemixCapturingConsumer} closes a vertex at its
-     * normal. This one delivers the coordinate first.
+     * <p>Vanilla's generator would deliver the vertex in a usable order, since 1.20.1
+     * ends a vertex with {@code endVertex()}, but it inverts its camera matrices on
+     * construction and allocates two vectors per vertex. This one is built once, assumes
+     * the identity pose the pass renders on, and like vanilla resolves each vertex at
+     * {@code endVertex()}, with Forge's stable nearest-direction choice so a face on a
+     * diagonal does not flicker between two projections.
      */
     static final class CrackProjector implements VertexConsumer {
         private final Quaternionf[] faceRotations = new Quaternionf[Direction.values().length];
         private final Vector3f projected = new Vector3f();
         private VertexConsumer target;
         private float x, y, z;
+        private float nx, ny = 1.0f, nz;
 
         CrackProjector() {
             for (Direction face : Direction.values()) {
@@ -193,10 +198,10 @@ public final class RemixBlockDamagePass {
         }
 
         @Override
-        public VertexConsumer vertex(float x, float y, float z) {
-            this.x = x;
-            this.y = y;
-            this.z = z;
+        public VertexConsumer vertex(double x, double y, double z) {
+            this.x = (float) x;
+            this.y = (float) y;
+            this.z = (float) z;
             target.vertex(x, y, z);
             return this;
         }
@@ -219,21 +224,40 @@ public final class RemixBlockDamagePass {
         }
 
         @Override
-        public VertexConsumer light(int u, int v) {
-            target.light(u, v);
+        public VertexConsumer uv2(int u, int v) {
+            target.uv2(u, v);
             return this;
         }
 
         @Override
         public VertexConsumer normal(float x, float y, float z) {
-            Direction face = Direction.getFacing(x, y, z);
+            nx = x;
+            ny = y;
+            nz = z;
+            return this;
+        }
+
+        @Override
+        public void endVertex() {
+            Direction face = ForgeHooksClient.getNearestStable(nx, ny, nz);
             projected.set(this.x, this.y, this.z)
-                    .yRot(Mth.PI)
-                    .xRot(-Mth.HALF_PI)
+                    .rotateY(Mth.PI)
+                    .rotateX(-Mth.HALF_PI)
                     .rotate(faceRotations[face.ordinal()]);
             target.uv(-projected.x, -projected.y);
-            target.normal(x, y, z);
-            return this;
+            target.normal(nx, ny, nz);
+            target.endVertex();
+            nx = 0.0f;
+            ny = 1.0f;
+            nz = 0.0f;
+        }
+
+        @Override
+        public void defaultColor(int red, int green, int blue, int alpha) {
+        }
+
+        @Override
+        public void unsetDefaultColor() {
         }
     }
 }

@@ -11,8 +11,11 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Queue of sections whose published vanilla chunk data is empty. The render
- * thread validates the live world section before removing Remix terrain.
+ * Queue of sections Embeddium settled as empty while Remix still holds terrain
+ * for them. Embeddium never runs a meshing task for an all-air section (its
+ * {@code WorldSlice.prepare} declines one), so no capture can replace that
+ * terrain; it is removed through this queue instead. The render thread
+ * validates the live world section before removing Remix terrain.
  */
 public final class SectionLeftRenderSetQueue {
 

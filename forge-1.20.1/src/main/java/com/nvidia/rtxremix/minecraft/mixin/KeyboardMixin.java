@@ -22,8 +22,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * Alt+X without Control toggles the overlay, and while its capture session is open every key
  * and character is withheld from Minecraft. Plain R toggles camera recording once an in-game
  * command has armed it, and = and - scrub time of day while recording. Injecting into
- * {@code KeyboardHandler.onKey} runs this at GLFW key-event time, so the modifier mask is read the
- * instant the key is pressed. Matched shortcuts cancel the event so vanilla does not also
+ * {@code KeyboardHandler.keyPress} runs this at GLFW key-event time, so the modifier mask is
+ * read the instant the key is pressed. Matched shortcuts cancel the event so vanilla, and
+ * Forge's {@code InputEvent.Key} and screen key events fired from inside it, do not also
  * handle it.
  */
 @Mixin(KeyboardHandler.class)
@@ -49,7 +50,7 @@ public class KeyboardMixin implements RemixKeyboardAccess {
         boolean controlDown = action == GLFW.GLFW_PRESS
                 && key == GLFW.GLFW_KEY_X
                 && ((mods & GLFW.GLFW_MOD_CONTROL) != 0 || Screen.hasControlDown());
-        RemixInputGate.KeyDecision decision = RtxRemixMod.getRemixInputGate().keyPress(
+        RemixInputGate.KeyDecision decision = RtxRemixMod.getRemixInputGate().onKey(
                 key, action, altDown, controlDown);
 
         if (decision == RemixInputGate.KeyDecision.BLOCK) {

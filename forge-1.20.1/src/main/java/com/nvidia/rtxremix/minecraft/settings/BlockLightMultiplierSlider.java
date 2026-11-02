@@ -43,7 +43,7 @@ class BlockLightMultiplierSlider extends AbstractSliderButton {
     }
 
     boolean commit() {
-        if (Float.compare(setting.get().getAsFloat(), (float) pendingMultiplier) == 0) {
+        if (Float.compare(setting.get().floatValue(), (float) pendingMultiplier) == 0) {
             return false;
         }
         setting.apply(pendingMultiplier);

@@ -20,7 +20,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /**
  * Applies the shared Remix overlay input policy to Minecraft's mouse callbacks.
  *
- * The gate blocks Minecraft only while the overlay capture session owns input.
+ * The gate blocks Minecraft only while the overlay capture session owns input. Each hook
+ * runs at the head of its handler, ahead of the Forge input and screen events fired inside.
  */
 @Mixin(MouseHandler.class)
 public abstract class MouseMixin implements RemixMouseAccess {
@@ -47,10 +48,10 @@ public abstract class MouseMixin implements RemixMouseAccess {
         }
 
         // Touchscreen mode counts outstanding presses and suppresses intermediate releases.
-        clickDepth = minecraft.options.touchscreen().getValue() ? 1 : 0;
+        clickDepth = minecraft.options.touchscreen().get() ? 1 : 0;
         rtxremix$releasingActiveButton = true;
         try {
-            onPress(minecraft.getWindow().getHandle(), activeButton, GLFW.GLFW_RELEASE, 0);
+            onPress(minecraft.getWindow().getWindow(), activeButton, GLFW.GLFW_RELEASE, 0);
         } finally {
             rtxremix$releasingActiveButton = false;
         }

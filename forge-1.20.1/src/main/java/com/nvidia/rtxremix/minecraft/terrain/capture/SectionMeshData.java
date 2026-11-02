@@ -175,7 +175,7 @@ public final class SectionMeshData {
         hash = hash * 31 + surface.indexCount;
         hash = hash * 31 + (surface.canonicalQuadIndices ? 1 : 0);
 
-        ByteBuffer vertices = surface.vertexBuffer.duplicateAllay().order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer vertices = surface.vertexBuffer.duplicate().order(ByteOrder.LITTLE_ENDIAN);
         vertices.position(0).limit(surface.vertexCount * 64);
         while (vertices.remaining() >= Integer.BYTES) hash = hash * 31 + vertices.getInt();
 

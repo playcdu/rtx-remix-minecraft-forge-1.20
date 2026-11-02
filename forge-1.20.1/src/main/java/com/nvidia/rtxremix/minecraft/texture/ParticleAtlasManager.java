@@ -41,7 +41,7 @@ import java.util.Map;
  * material serves both the alpha-tested and the blended particle passes.
  *
  * <p>Mirrors {@link BlockTextureManager#buildAtlasMaterials} but operates on
- * the particle atlas ({@code TextureAtlas.PARTICLE_ATLAS_TEXTURE}).
+ * the particle atlas ({@code TextureAtlas.LOCATION_PARTICLES}).
  *
  * <p>TERRAIN_SHEET particles reuse materials from {@link BlockTextureManager}
  * rather than creating new ones here.
@@ -72,7 +72,7 @@ public class ParticleAtlasManager {
             if (api == null || client == null || client.getTextureManager() == null) return;
 
             AbstractTexture tex = client.getTextureManager()
-                    .getTexture(TextureAtlas.PARTICLE_ATLAS_TEXTURE);
+                    .getTexture(TextureAtlas.LOCATION_PARTICLES);
             if (!(tex instanceof TextureAtlas atlas)) return;
 
             SpriteAtlasAccessor acc = (SpriteAtlasAccessor) atlas;
@@ -116,8 +116,8 @@ public class ParticleAtlasManager {
                 ResourceLocation spriteId = entry.getKey();
                 TextureAtlasSprite sprite = entry.getValue();
                 int pixX = sprite.getX(), pixY = sprite.getY();
-                int pixW = sprite.contents().getWidth();
-                int pixH = sprite.contents().getHeight();
+                int pixW = sprite.contents().width();
+                int pixH = sprite.contents().height();
 
                 ResourceLocation texId = new ResourceLocation(spriteId.getNamespace(),
                         "particle/" + spriteId.getPath());

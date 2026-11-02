@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
+import net.minecraft.util.Mth;
 
 /**
  * Drives the minecraft-logic conf option-layers directly: one runtime layer
@@ -41,7 +42,7 @@ import java.util.regex.Pattern;
  * installation and holds generic archetypes; it is acquired at init. The WORLD
  * root, {@code <world>/rtx-remix/confs/}, lives inside a save directory and is
  * acquired on world join and released on leave, so a published map carries its
- * own looks with no separate download. Level profiles sit just above their mod
+ * own looks with no separate download. World profiles sit just above their mod
  * counterparts in priority, so a map overrides the options it names and
  * inherits the rest from the archetype. Single-player only: a remote server
  * gives this client no save directory.
@@ -136,7 +137,7 @@ public final class ConfLayerDriver {
     private static final float BIOME_BLEND_THRESHOLD = 0.01f;
     private static final float ZONE_PRIORITY = 11000f;
     private static final float ZONE_BLEND_THRESHOLD = 0.01f;
-    // Level profiles sit just above their mod counterparts, so a map's file
+    // World profiles sit just above their mod counterparts, so a map's file
     // wins per option while the mod archetype still supplies keys the map
     // leaves out. Sparse override rather than wholesale replacement, which is
     // how every other layer in this system already behaves.
@@ -207,7 +208,7 @@ public final class ConfLayerDriver {
      * night-to-dawn crossfade under the runtime's nested-LERP resolution.
      */
     static TimeLayerStrengths timeLayerStrengths(long timeOfDay) {
-        long tick = Math.positiveModulo(timeOfDay, DAY_LENGTH_TICKS);
+        long tick = Math.floorMod(timeOfDay, DAY_LENGTH_TICKS);
         if (tick < DAWN_TO_DAY_END_TICK) {
             float day = transitionStrength(tick, 0L, DAWN_TO_DAY_END_TICK);
             return new TimeLayerStrengths(1.0f, day, 0.0f, 0.0f);
@@ -376,7 +377,7 @@ public final class ConfLayerDriver {
         }
     }
 
-    // Keyed by LayerSpec.location(), so one channel can hold a mod layer and a world
+    // Keyed by LayerSpec.id(), so one channel can hold a mod layer and a world
     // layer at once. Per-frame targets go through channelIndex instead.
     private final Map<String, LayerState> layersById = new LinkedHashMap<>();
     private final Map<String, List<LayerState>> channelIndex = new HashMap<>();
@@ -396,7 +397,7 @@ public final class ConfLayerDriver {
 
     public ConfLayerDriver() {
         for (LayerSpec spec : STATIC_LAYER_TABLE) {
-            layersById.put(spec.location(), new LayerState(spec));
+            layersById.put(spec.id(), new LayerState(spec));
         }
         reindex();
     }
@@ -503,7 +504,7 @@ public final class ConfLayerDriver {
             }
             layer.lastSent = 0.0f; // every acquire starts the layer at strength 0
             layer.inert = !confFileSetsOptions(confPath);
-            LOGGER.printDebugLog("Acquired {} conf layer {} (priority {}, threshold {}): {}",
+            LOGGER.info("Acquired {} conf layer {} (priority {}, threshold {}): {}",
                     layer.spec.source() == LayerSource.WORLD ? "world" : "mod",
                     layer.spec.name(), layer.spec.priority(), layer.spec.blendThreshold(), confPath);
         }
@@ -617,7 +618,7 @@ public final class ConfLayerDriver {
      * it.
      */
     static boolean confSetsOptions(String contents) {
-        return contents.lines().contains(line -> OPTION_LINE.matcher(line).setLookingAt());
+        return contents.lines().anyMatch(line -> OPTION_LINE.matcher(line).lookingAt());
     }
 
     /**
@@ -653,14 +654,14 @@ public final class ConfLayerDriver {
         }
         Map<String, LayerState> rebuilt = new LinkedHashMap<>();
         for (LayerSpec spec : specs) {
-            LayerState existing = layersById.get(spec.location());
-            rebuilt.put(spec.location(),
+            LayerState existing = layersById.get(spec.id());
+            rebuilt.put(spec.id(),
                     existing != null && existing.spec.equals(spec) ? existing : new LayerState(spec));
         }
         // Anything dropped from the catalog must give its handle back first.
         for (Map.Entry<String, LayerState> entry : layersById.entrySet()) {
             if (!rebuilt.containsKey(entry.getKey())) {
-                releaseLayer(entry.location());
+                releaseLayer(entry.getValue());
             }
         }
         layersById.clear();
@@ -719,7 +720,7 @@ public final class ConfLayerDriver {
         float dtSeconds = frameDtSeconds();
 
         setTarget(LogicChannels.UNDERWATER, underwater ? 1.0f : 0.0f);
-        setTarget(LogicChannels.VIEW_DISTANCE, Math.clamp(viewDistanceStrength, 0.0f, 1.0f));
+        setTarget(LogicChannels.VIEW_DISTANCE, Mth.clamp(viewDistanceStrength, 0.0f, 1.0f));
         // Time layers follow the shared Overworld clock only; other dimensions
         // contribute no time-of-day strength.
         TimeLayerStrengths time = Level.OVERWORLD.equals(world.dimension())
@@ -734,7 +735,7 @@ public final class ConfLayerDriver {
         // Resolve the camera-position biome once (vanilla namespace only) and
         // target its authored layer when one was discovered. An unconfigured
         // or modded biome targets every discovered biome layer back to 0.
-        String biomeLayerName = world.getBiome(BlockPos.containing(cameraPos)).getKey()
+        String biomeLayerName = world.getBiome(BlockPos.containing(cameraPos)).unwrapKey()
                 .filter(key -> "minecraft".equals(key.location().getNamespace()))
                 .map(key -> LogicChannels.BIOME_PREFIX + key.location().getPath())
                 .orElse(null);
@@ -887,7 +888,7 @@ public final class ConfLayerDriver {
     public List<LayerStatus> snapshot() {
         List<LayerStatus> snapshot = new ArrayList<>(layersById.size());
         for (LayerState layer : layersById.values()) {
-            snapshot.add(new LayerStatus(layer.spec.location(), layer.current, layer.handle != 0));
+            snapshot.add(new LayerStatus(layer.spec.id(), layer.current, layer.handle != 0));
         }
         snapshot.sort(Comparator.comparing(LayerStatus::name));
         return snapshot;
@@ -1095,6 +1096,6 @@ public final class ConfLayerDriver {
         if (previous == 0) {
             return 0.0f;
         }
-        return Math.clamp((now - previous) / 1.0e9f, 0.0f, MAX_FRAME_DT_SECONDS);
+        return Mth.clamp((now - previous) / 1.0e9f, 0.0f, MAX_FRAME_DT_SECONDS);
     }
 }

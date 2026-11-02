@@ -5,8 +5,6 @@
 package com.nvidia.rtxremix.minecraft.particle.rapids;
 
 import com.nvidia.rtxremix.minecraft.RtxRemixMod;
-import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandler; // PORT: Fabric API
-import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandlerRegistry; // PORT: Fabric API
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.particle.Particle;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -18,6 +16,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.util.RandomSource;
+import net.minecraftforge.client.extensions.common.IClientFluidTypeExtensions;
 
 public final class WaterRapidParticleSpawner {
     private static final int[] CARDINAL_X = {1, -1, 0, 0};
@@ -40,6 +39,10 @@ public final class WaterRapidParticleSpawner {
     private static ClientLevel budgetWorld;
     private static long budgetWorldTime = Long.MIN_VALUE;
     private static SpawnBudget tickBudget = new SpawnBudget(0);
+    // Resolved from the registry objects once per spawn pass, on the client thread.
+    private static SimpleParticleType foamType;
+    private static SimpleParticleType foamDotType;
+    private static SimpleParticleType mistType;
 
     private WaterRapidParticleSpawner() {}
 
@@ -47,6 +50,15 @@ public final class WaterRapidParticleSpawner {
         if (!RtxRemixMod.isRtxEnabled() || !RtxRemixMod.isWorldEnabled() || !RtxRemixMod.isParticlesEnabled()) {
             return;
         }
+
+        // Off for a whole connection to a server without this mod, whose registry sync
+        // dropped the rapids particle types; see RapidFoamParticles.
+        if (!RapidFoamParticles.isAvailable()) {
+            return;
+        }
+        foamType = RapidFoamParticles.RAPID_FOAM.get();
+        foamDotType = RapidFoamParticles.RAPID_FOAM_DOT.get();
+        mistType = RapidFoamParticles.RAPID_MIST.get();
 
         Minecraft client = Minecraft.getInstance();
         if (client == null || client.particleEngine == null) {
@@ -156,7 +168,7 @@ public final class WaterRapidParticleSpawner {
             vy = Math.min(vy, -VERTICAL_DOWNWARD_SPEED - random.nextDouble() * 0.12);
         }
 
-        Particle foam = addParticle(client, budget, RapidFoamParticles.RAPID_FOAM, spawnX, spawnY, spawnZ, vx, vy, vz);
+        Particle foam = addParticle(client, budget, foamType, spawnX, spawnY, spawnZ, vx, vy, vz);
         tint(foam, color);
 
         int dotCount = falling ? 3 : 2;
@@ -164,7 +176,7 @@ public final class WaterRapidParticleSpawner {
             double dotX = spawnX + (random.nextDouble() - 0.5) * 0.18;
             double dotY = spawnY - 0.05 + random.nextDouble() * 0.16;
             double dotZ = spawnZ + (random.nextDouble() - 0.5) * 0.18;
-            Particle dot = addParticle(client, budget, RapidFoamParticles.RAPID_FOAM_DOT,
+            Particle dot = addParticle(client, budget, foamDotType,
                     dotX, dotY, dotZ, vx * 0.85, vy * 0.9, vz * 0.85);
             tint(dot, color);
         }
@@ -178,7 +190,7 @@ public final class WaterRapidParticleSpawner {
 
         int dx = Mth.floor(flow.x / Math.sqrt(horizontalLengthSquared) + 0.5);
         int dz = Mth.floor(flow.z / Math.sqrt(horizontalLengthSquared) + 0.5);
-        BlockPos impactPos = pos.below().add(dx, 0, dz);
+        BlockPos impactPos = pos.below().offset(dx, 0, dz);
         return world.getFluidState(impactPos).is(FluidTags.WATER) ? impactPos : null;
     }
 
@@ -196,7 +208,7 @@ public final class WaterRapidParticleSpawner {
 
             int dx = CARDINAL_X[i];
             int dz = CARDINAL_Z[i];
-            BlockPos impactPos = pos.add(dx, 0, dz);
+            BlockPos impactPos = pos.offset(dx, 0, dz);
             FluidState impactState = world.getFluidState(impactPos);
             if (!impactState.is(FluidTags.WATER) || isFallingWater(impactState)) {
                 continue;
@@ -210,7 +222,7 @@ public final class WaterRapidParticleSpawner {
     }
 
     private static boolean isFallingWater(FluidState state) {
-        return state.is(FluidTags.WATER) && state.contains(FlowingFluid.FALLING) && state.get(FlowingFluid.FALLING);
+        return state.is(FluidTags.WATER) && state.hasProperty(FlowingFluid.FALLING) && state.getValue(FlowingFluid.FALLING);
     }
 
     private static void emitMist(Minecraft client, ClientLevel world, BlockPos pos, BlockPos impactPos,
@@ -227,13 +239,13 @@ public final class WaterRapidParticleSpawner {
         double side = (random.nextDouble() - 0.5) * 0.95;
         double x = pos.getX() + 0.5 + dirX * downstream + sideX * side;
         FluidState impactFluidState = world.getFluidState(impactPos);
-        double y = impactPos.getY() + impactFluidState.getOwnHeight(world, impactPos) + 0.05 + random.nextDouble() * 0.35;
+        double y = impactPos.getY() + impactFluidState.getHeight(world, impactPos) + 0.05 + random.nextDouble() * 0.35;
         double z = pos.getZ() + 0.5 + dirZ * downstream + sideZ * side;
         double speed = 0.012 + random.nextDouble() * 0.018;
         double vx = dirX * speed + sideX * (random.nextDouble() - 0.5) * 0.012;
         double vy = 0.018 + random.nextDouble() * 0.025;
         double vz = dirZ * speed + sideZ * (random.nextDouble() - 0.5) * 0.012;
-        addParticle(client, budget, RapidFoamParticles.RAPID_MIST, x, y, z, vx, vy, vz);
+        addParticle(client, budget, mistType, x, y, z, vx, vy, vz);
     }
 
     private static double spawnCoord(int blockCoord, double flowComponent, RandomSource random) {
@@ -244,14 +256,18 @@ public final class WaterRapidParticleSpawner {
     private static double spawnY(ClientLevel world, BlockPos pos, FluidState fluidState, RandomSource random) {
         BlockPos above = pos.above();
         if (!world.getFluidState(above).is(FluidTags.WATER)) {
-            return pos.getY() + fluidState.getOwnHeight(world, pos) + 0.025;
+            return pos.getY() + fluidState.getHeight(world, pos) + 0.025;
         }
         return pos.getY() + 0.15 + random.nextDouble() * 0.7;
     }
 
     private static float[] foamColor(ClientLevel world, BlockPos pos, FluidState fluidState) {
-        FluidRenderHandler handler = FluidRenderHandlerRegistry.INSTANCE.get(fluidState.getType());
-        int color = handler != null ? handler.getFluidColor(world, pos, fluidState) : 0x3F76E4;
+        // Forge's client fluid extensions supply the tint the liquid renderer draws
+        // with; for water that is the biome water colour.
+        IClientFluidTypeExtensions extensions = IClientFluidTypeExtensions.of(fluidState);
+        int color = extensions != IClientFluidTypeExtensions.DEFAULT
+                ? extensions.getTintColor(fluidState, world, pos)
+                : 0x3F76E4;
         float r = ((color >> 16) & 0xFF) / 255.0f;
         float g = ((color >> 8) & 0xFF) / 255.0f;
         float b = (color & 0xFF) / 255.0f;
@@ -273,7 +289,7 @@ public final class WaterRapidParticleSpawner {
     }
 
     private static SpawnBudget currentTickBudget(ClientLevel world) {
-        long worldTime = world.getTime();
+        long worldTime = world.getGameTime();
         if (world != budgetWorld || worldTime != budgetWorldTime) {
             budgetWorld = world;
             budgetWorldTime = worldTime;
@@ -289,7 +305,7 @@ public final class WaterRapidParticleSpawner {
         if (!budget.hasRemaining()) {
             return null;
         }
-        Particle particle = client.particleEngine.spawnParticle(type, x, y, z, vx, vy, vz);
+        Particle particle = client.particleEngine.createParticle(type, x, y, z, vx, vy, vz);
         if (particle != null) {
             budget.consume();
         }

@@ -127,7 +127,7 @@ public final class CloudRenderer {
         }
 
         Minecraft client = Minecraft.getInstance();
-        float cloudHeight = world.effects().getCloudsHeight();
+        float cloudHeight = world.effects().getCloudHeight();
         if (client.options.getCloudsType() == CloudStatus.OFF
                 || Float.isNaN(cloudHeight)) {
             releaseResources();
@@ -148,7 +148,7 @@ public final class CloudRenderer {
             return;
         }
 
-        double worldTime = world.getTime() + (double) tickDelta;
+        double worldTime = world.getGameTime() + (double) tickDelta;
         if (!ensurePalette()) {
             return;
         }
@@ -384,7 +384,7 @@ public final class CloudRenderer {
             var resource = client.getResourceManager().getResource(VANILLA_CLOUD_TEXTURE)
                     .orElseThrow(() -> new IOException(
                             "Missing texture " + VANILLA_CLOUD_TEXTURE));
-            try (NativeImage image = NativeImage.read(resource.getInputStream())) {
+            try (NativeImage image = NativeImage.read(resource.open())) {
                 vanillaTextureWidth = image.getWidth();
                 vanillaTextureHeight = image.getHeight();
                 vanillaOccupancy =

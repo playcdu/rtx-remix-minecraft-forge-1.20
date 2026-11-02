@@ -196,7 +196,7 @@ public class RemixEntityPass {
             return;
         }
         long oldest = sweepFrame - (long) POSE_REFRESH_FRAMES * 4L;
-        poseSnapshots.values().removeAll(snapshot -> snapshot.frame < oldest);
+        poseSnapshots.values().removeIf(snapshot -> snapshot.frame < oldest);
     }
 
     /**
@@ -255,7 +255,7 @@ public class RemixEntityPass {
     private boolean captureAndSubmit(Entity entity, EntityRenderDispatcher dispatcher,
                                      float tickDelta, RemixEntitySubmitter submitter,
                                      boolean snapshotPose) {
-        if (!capturedIds.add(entity.getKey())) {
+        if (!capturedIds.add(entity.getId())) {
             return false;
         }
         long captureStart = System.nanoTime();
@@ -438,7 +438,7 @@ public class RemixEntityPass {
         // keeping the first `budget` slots of a larger heap would keep the farthest entity
         // (slot 0 is the max) and drop near ones from the leaves. Letting the heap do the
         // eviction is what actually makes the selection closest-first.
-        entityHeap.updateScreenAndTick(budget);
+        entityHeap.reset(budget);
         // Timed from here so the world walk and heap build below fall inside the section
         // that reports the off-frustum sweep.
         long sweepStart = System.nanoTime();
@@ -447,11 +447,11 @@ public class RemixEntityPass {
         double maxDistSq = getEffectiveEntityRenderDistance();
         maxDistSq *= maxDistSq;
         for (Entity entity : world.entitiesForRendering()) {
-            if (capturedIds.contains(entity.getKey())) {
+            if (capturedIds.contains(entity.getId())) {
                 continue;
             }
             double distSq = entity.distanceToSqr(cameraPos);
-            boolean ownsLight = lightOwners.test(entity.getKey());
+            boolean ownsLight = lightOwners.test(entity.getId());
             if (!sweepAdmits(distSq, maxDistSq, ownsLight)) {
                 continue;
             }
@@ -471,7 +471,7 @@ public class RemixEntityPass {
                 }
             }
             for (int i = 0, n = entityHeap.size(); i < n; i++) {
-                Entity entity = entityHeap.byString(i);
+                Entity entity = entityHeap.get(i);
                 if (submitOffFrustum(entity, cameraPos, tickDelta, dispatcher, submitter)) {
                     frameOffCount++;
                 }
@@ -513,7 +513,7 @@ public class RemixEntityPass {
         StringBuilder sb = new StringBuilder("\n=== Entity Type Breakdown (")
                 .append(frames).append(" frames) ===\n");
         sb.append(String.format("  %-35s %8s %8s %8s\n", "Type", "Ent/frm", "Lay/frm", "Bone/frm"));
-        typeCounts.entrySet().outFromOrigin()
+        typeCounts.entrySet().stream()
                 .sorted((a, b) -> Integer.compare(b.getValue()[0], a.getValue()[0]))
                 .forEach(e -> {
                     int[] s = e.getValue();
@@ -532,7 +532,7 @@ public class RemixEntityPass {
                     submitFailuresSinceSummary / (double) frames));
         }
         sb.append("==========================================");
-        LOGGER.printDebugLog(sb.toString());
+        LOGGER.info(sb.toString());
     }
 
     /**
@@ -566,22 +566,22 @@ public class RemixEntityPass {
                                      RemixEntitySubmitter submitter) {
         boolean far = entity.distanceToSqr(cameraPos) > POSE_REUSE_MIN_SQ;
         if (far) {
-            PoseSnapshot snapshot = poseSnapshots.byString(entity.getKey());
+            PoseSnapshot snapshot = poseSnapshots.get(entity.getId());
             // The stagger spreads refreshes across frames; the age test is what bounds
             // the lag. In-place captures record no pose, so an entity that has been on
             // screen for a while still holds the snapshot from before it entered the
             // frustum, and the stagger alone would replay that for up to three frames.
             boolean dueRefresh = snapshot == null
                     || sweepFrame - snapshot.frame >= POSE_REFRESH_FRAMES
-                    || Math.positiveModulo(entity.getKey() + sweepFrame, POSE_REFRESH_FRAMES) == 0;
-            if (!dueRefresh && capturedIds.add(entity.getKey())) {
+                    || Math.floorMod(entity.getId() + sweepFrame, POSE_REFRESH_FRAMES) == 0;
+            if (!dueRefresh && capturedIds.add(entity.getId())) {
                 if (replayPose(entity, snapshot, tickDelta, submitter)) {
                     frameOffReused++;
                     return true;
                 }
                 // Replay failed, so fall through to a full capture. The id is already
                 // claimed, so clear it or captureAndSubmit will treat it as a duplicate.
-                capturedIds.remove(entity.getKey());
+                capturedIds.remove(entity.getId());
             }
         }
         return captureAndSubmit(entity, dispatcher, tickDelta, submitter, far);
@@ -609,20 +609,20 @@ public class RemixEntityPass {
                     // instance. Any pose recorded before that is now unreachable geometry, and
                     // leaving it would have refresh frames capture the new pose while the
                     // frames between them replayed the old one.
-                    poseSnapshots.remove(entity.getKey());
+                    poseSnapshots.remove(entity.getId());
                     return;
                 }
             }
         }
 
-        PoseSnapshot snapshot = poseSnapshots.byString(entity.getKey());
+        PoseSnapshot snapshot = poseSnapshots.get(entity.getId());
         if (snapshot == null) {
             snapshot = new PoseSnapshot();
-            poseSnapshots.put(entity.getKey(), snapshot);
+            poseSnapshots.put(entity.getId(), snapshot);
         }
         snapshot.resizeLayers(layers.size());
         for (int i = 0; i < layers.size(); i++) {
-            RemixVertexConsumerProvider.CapturedLayer layer = layers.byString(i);
+            RemixVertexConsumerProvider.CapturedLayer layer = layers.get(i);
             RemixCapturingConsumer consumer = layer.consumer();
             SnapshotLayer snapLayer = snapshot.layers[i];
             snapLayer.renderLayer = layer.renderLayer();
@@ -683,7 +683,7 @@ public class RemixEntityPass {
         EntityCaptureResult result = new EntityCaptureResult(
                 entity,
                 entity.getPosition(tickDelta),
-                Mth.lerp(tickDelta, entity.yRotO, entity.getViewYRot()),
+                Mth.lerp(tickDelta, entity.yRotO, entity.getYRot()),
                 layers,
                 snapshot.boneData,
                 snapshot.boneCount,
@@ -727,15 +727,15 @@ public class RemixEntityPass {
                                                  float tickDelta,
                                                  boolean firstPersonLocalPlayer) {
         Vec3 entityPos = entity.getPosition(tickDelta);
-        float yaw = Mth.lerp(tickDelta, entity.yRotO, entity.getViewYRot());
+        float yaw = Mth.lerp(tickDelta, entity.yRotO, entity.getYRot());
 
         // Light is discarded by the capture; any value reaches the same result.
-        int light = LightTexture.MAX_LIGHT_COORDINATE;
+        int light = LightTexture.FULL_BRIGHT;
 
         provider.beginEntity();
-        EntityRenderContext ctx = EntityRenderContext.byString();
+        EntityRenderContext ctx = EntityRenderContext.get();
 
-        sharedMatrices.push();
+        sharedMatrices.pushPose();
         try {
             dispatcher.render(entity, 0.0, 0.0, 0.0, yaw, tickDelta, sharedMatrices, provider, light);
         } finally {
@@ -744,8 +744,8 @@ public class RemixEntityPass {
             // entry, and a capture left open would make the next one look nested
             // and keep its bone numbering. The bone count stays readable for the
             // snapshot below.
-            sharedMatrices.updateScreenAndTick();
-            ctx.updateScreenAndTick();
+            sharedMatrices.reset();
+            ctx.reset();
         }
 
         List<RemixVertexConsumerProvider.CapturedLayer> layers = provider.endEntity();

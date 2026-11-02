@@ -7,7 +7,7 @@ package com.nvidia.rtxremix.minecraft.settings;
 import java.util.function.BiConsumer;
 
 /**
- * Tracks post-processing values exposed by the Fabric settings screen. The
+ * Tracks post-processing values exposed by the RTX settings screen. The
  * authored defaults live in {@code rtx.conf}, so construction is write-free.
  * Live edits, persisted overrides, and Reset appliers call the writer.
  */

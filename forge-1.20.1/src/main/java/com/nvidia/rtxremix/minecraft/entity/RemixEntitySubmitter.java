@@ -132,7 +132,7 @@ public class RemixEntitySubmitter {
             new ResourceLocation("minecraft", "textures/atlas/banner_patterns.png");
     private static final ResourceLocation SHIELD_PATTERNS_ATLAS_TEXTURE =
             new ResourceLocation("minecraft", "textures/atlas/shield_patterns.png");
-    private static final ResourceLocation PARTICLE_ATLAS_ID = TextureAtlas.PARTICLE_ATLAS_TEXTURE;
+    private static final ResourceLocation PARTICLE_ATLAS_ID = TextureAtlas.LOCATION_PARTICLES;
     private static final ResourceLocation BEDS_ATLAS_TEXTURE =
             new ResourceLocation("minecraft", "textures/atlas/beds.png");
     private static final ResourceLocation MAP_DECORATIONS_ATLAS_TEXTURE =
@@ -621,7 +621,7 @@ public class RemixEntitySubmitter {
             for (RemixTexture texture : ownedTextures) {
                 if (texture != null && !texture.isDeleted()) texture.destroy();
             }
-            ownedTextures.clearTextureData();
+            ownedTextures.clear();
         }
     }
 
@@ -737,7 +737,7 @@ public class RemixEntitySubmitter {
         for (RemixMesh mesh : meshes) {
             if (!mesh.isDeletedFast()) mesh.destroy();
         }
-        meshes.clearTextureData();
+        meshes.clear();
     }
 
     private static void destroyRetainedPart(RetainedEntityPart part) {
@@ -774,7 +774,7 @@ public class RemixEntitySubmitter {
         for (BeaconLensAssets assets : beaconLensAssets.values()) {
             destroyBeaconLensAssets(textures, assets);
         }
-        beaconLensAssets.clearTextureData();
+        beaconLensAssets.clear();
     }
 
     // --- per-entity submission ---
@@ -1043,8 +1043,8 @@ public class RemixEntitySubmitter {
         /** Starts a capture whose part bones index {@code boneData}, twelve floats each. */
         void beginEntity(float[] boneData) {
             this.boneData = boneData;
-            baseSides.clearTextureData();
-            baseBones.clearTextureData();
+            baseSides.clear();
+            baseBones.clear();
         }
 
         /** Records the bases of a layer; only a translucent pattern-atlas layer holds any. */
@@ -1214,7 +1214,7 @@ public class RemixEntitySubmitter {
         CopperBeaconBlockEntity beacon = placedBeaconLens(result.owner(), sprite);
         boolean emissiveBeaconLens = beacon != null
                 && CopperBeaconBlockEntityRenderer.LENS_SPRITE_ID.equals(
-                        sprite.contents().location());
+                        sprite.contents().name());
         RemixMesh mesh = emissiveBeaconLens
                 ? acquireBeaconLensMesh(
                         beacon, vertexCount, texId, shellLayer, sides, sprite)
@@ -1241,9 +1241,9 @@ public class RemixEntitySubmitter {
         return owner instanceof CopperBeaconBlockEntity beacon
                         && sprite != null
                         && (CopperBeaconBlockEntityRenderer.LENS_SPRITE_ID.equals(
-                                        sprite.contents().location())
+                                        sprite.contents().name())
                                 || CopperBeaconBlockEntityRenderer.UNLIT_LENS_SPRITE_ID.equals(
-                                        sprite.contents().location()))
+                                        sprite.contents().name()))
                 ? beacon
                 : null;
     }
@@ -1282,7 +1282,7 @@ public class RemixEntitySubmitter {
             if (material == null) {
                 return null;
             }
-            rebuildScratch.clearTextureData();
+            rebuildScratch.clear();
             rebuildScratch.emitCuboidGeometry(sides, 0xFFFFFFFF, 0, sprite);
             rebuildScratch.finishOpenVertex();
             RemixMesh mesh = createMeshWithMaterial(
@@ -1343,7 +1343,7 @@ public class RemixEntitySubmitter {
         if (mesh == null) {
             RigidMeshKey meshKey = rigidMeshLookupKey.immutableCopy();
             pendingPartKey = meshKey;
-            rebuildScratch.clearTextureData();
+            rebuildScratch.clear();
             emitCanvasPatterns(rebuildScratch, consumer, firstPart, patternCount, layerIndex);
             rebuildScratch.finishOpenVertex();
             // Every layer's depth is already in its vertices, so the mesh is built at shell 0.
@@ -1401,7 +1401,7 @@ public class RemixEntitySubmitter {
         if (!Arrays.equals(part.transform.matrix, reusableRigidTransform.matrix)) {
             System.arraycopy(reusableRigidTransform.matrix, 0,
                     part.transform.matrix, 0, reusableRigidTransform.matrix.length);
-            part.instance.loadPose(part.transform);
+            part.instance.setTransform(part.transform);
         }
         part.instance
                 .setMesh(mesh)
@@ -1455,7 +1455,7 @@ public class RemixEntitySubmitter {
         }
         // Rebuild through the same emitter and the same buildSurface the captured
         // path uses, so there is one geometry path rather than two that can drift.
-        rebuildScratch.clearTextureData();
+        rebuildScratch.clear();
         // The mesh is tint-free: tint is applied per instance, so every recolour
         // of this cuboid shares the one white-baked mesh. The sprite's UV remap is
         // baked here instead, which is why the sprite is part of the key.
@@ -1561,7 +1561,7 @@ public class RemixEntitySubmitter {
         // A hue-cycling tint mints new values indefinitely; the extensions are
         // tiny and rebuildable, so a full reset is cheaper than an LRU.
         if (tintBlendCache.size() > 4096) {
-            tintBlendCache.clearTextureData();
+            tintBlendCache.clear();
         }
         long key = ((long) role.ordinal() << 32) | (tintColor & 0xFFFFFFFFL);
         InstanceInfoBlendEXT ext = tintBlendCache.get(key);
@@ -2045,7 +2045,7 @@ public class RemixEntitySubmitter {
         int evicted = 0;
         Iterator<Map.Entry<RigidMeshKey, PooledMesh>> it = rigidMeshPool.entrySet().iterator();
         while (rigidMeshPool.size() > MAX_MESH_CACHE_ENTRIES && it.hasNext()) {
-            PooledMesh entry = it.next().glFormat();
+            PooledMesh entry = it.next().getValue();
             if (entry.lastUsedFrame == frameIndex()) continue;
 
             it.remove();
@@ -2317,11 +2317,11 @@ public class RemixEntitySubmitter {
             Map<ResourceLocation, TextureAtlasSprite> sprites = ((SpriteAtlasAccessor) atlas).getSprites();
             for (Map.Entry<ResourceLocation, TextureAtlasSprite> entry : sprites.entrySet()) {
                 ResourceLocation spriteId = entry.getKey();
-                TextureAtlasSprite sprite = entry.glFormat();
+                TextureAtlasSprite sprite = entry.getValue();
                 int x = sprite.getX();
                 int y = sprite.getY();
-                int spriteW = sprite.contents().getWidth();
-                int spriteH = sprite.contents().getHeight();
+                int spriteW = sprite.contents().width();
+                int spriteH = sprite.contents().height();
                 NativeImage nImg = loadVariant(rm, spriteId, "_n");
                 NativeImage sImg = loadVariant(rm, spriteId, "_s");
                 NativeImage sssImg = loadVariant(rm, spriteId, "_sss");
@@ -2390,7 +2390,7 @@ public class RemixEntitySubmitter {
                         TextureFormat.RGBA8_UNORM, TexturePurpose.DATA);
             }
             textures.hasPBR = hasNormal || hasSpecular || hasSss;
-            LOGGER.printDebugLog("Created entity atlas textures for {} ({}x{}, {} sprites, LabPBR={})",
+            LOGGER.info("Created entity atlas textures for {} ({}x{}, {} sprites, LabPBR={})",
                     textureId, w, h, sprites.size(), textures.hasPBR);
             return textures;
         } catch (Exception e) {
@@ -2484,7 +2484,7 @@ public class RemixEntitySubmitter {
         while (materials.hasNext()) {
             Map.Entry<EntityMaterialKey, RemixMaterial> entry = materials.next();
             if (!textureId.equals(entry.getKey().textureId())) continue;
-            RemixMaterial material = entry.glFormat();
+            RemixMaterial material = entry.getValue();
             materials.remove();
             if (!isBorrowedAtlasMaterial(textureId) && material != null && !material.isDeleted()) {
                 material.destroy();
@@ -2507,7 +2507,7 @@ public class RemixEntitySubmitter {
             Map.Entry<RigidMeshKey, PooledMesh> entry = rigidIt.next();
             if (!textureId.equals(entry.getKey().texId())) continue;
 
-            RemixMesh mesh = entry.glFormat().mesh;
+            RemixMesh mesh = entry.getValue().mesh;
             rigidIt.remove();
             if (mesh != null && !mesh.isDeletedFast()) mesh.destroy();
         }
@@ -2639,7 +2639,7 @@ public class RemixEntitySubmitter {
         MaterialInfo info = materialBuilder.opaqueExt(opaque.build()).build();
         RemixMaterial material = new RemixMaterial(info, textures.ownedTextures, null);
         RemixMaterialStore.get().create(material);
-        LOGGER.printDebugLog("Created entity material {} (mode={}, LabPBR={}, normal={}, height={}, "
+        LOGGER.info("Created entity material {} (mode={}, LabPBR={}, normal={}, height={}, "
                         + "specular={}, emissive={}, sss={}, sssProfile={})",
                 key.textureId(), key.surfaceMode(), textures.hasPBR,
                 textures.normal != null, textures.height != null,
@@ -2789,39 +2789,39 @@ public class RemixEntitySubmitter {
 
     /** Invalidates all resource-derived assets while retaining downloaded skin pixels. */
     public void reloadMaterials() {
-        retainedEntityParts.clearTextureData(RemixEntitySubmitter::destroyRetainedPart);
+        retainedEntityParts.clear(RemixEntitySubmitter::destroyRetainedPart);
         frameOpen = false;
         clearBeaconLensAssets();
 
         for (PooledMesh pooled : rigidMeshPool.values()) {
             if (!pooled.mesh.isDeletedFast()) pooled.mesh.destroy();
         }
-        rigidMeshPool.clearTextureData();
+        rigidMeshPool.clear();
         destroyMeshes(previousTransientMeshes);
         destroyMeshes(transientMeshes);
 
         for (Map.Entry<EntityMaterialKey, RemixMaterial> e : materialCache.entrySet()) {
             if (!isBorrowedAtlasMaterial(e.getKey().textureId())) {
-                RemixMaterial mat = e.glFormat();
+                RemixMaterial mat = e.getValue();
                 if (!mat.isDeleted()) mat.destroy();
             }
         }
-        materialCache.clearTextureData();
+        materialCache.clear();
 
         for (EntityTextureSet textures : textureSets.values()) textures.destroy();
-        textureSets.clearTextureData();
-        dynamicTextureSizes.clearTextureData();
-        dynamicTextureVersions.clearTextureData();
-        failedTextures.clearTextureData();
-        resourceMissing.clearTextureData();
-        missingMaterialSince.clearTextureData();
-        warnedMissingMaterials.clearTextureData();
+        textureSets.clear();
+        dynamicTextureSizes.clear();
+        dynamicTextureVersions.clear();
+        failedTextures.clear();
+        resourceMissing.clear();
+        missingMaterialSince.clear();
+        warnedMissingMaterials.clear();
         labPBRVariants = null;
     }
 
     public void clear() {
         reloadMaterials();
-        DynamicTextureCache.clearTextureData();
+        DynamicTextureCache.clear();
     }
 
     public void close() {

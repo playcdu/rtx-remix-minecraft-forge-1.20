@@ -4,6 +4,8 @@
  */
 package com.nvidia.rtxremix.minecraft.light;
 
+import net.minecraft.util.Mth;
+
 /**
  * Shared tuning for the lighthouse beam emitted by {@link SpotLightBlock}.
  *
@@ -183,7 +185,7 @@ public final class BeaconBeam {
     }
 
     static float heldConeAngle(double placementFraction) {
-        float blend = (float) Math.clamp(
+        float blend = (float) Mth.clamp(
                 (1.0 - placementFraction) / HELD_NEAR_WALL_TRANSITION_FRACTION,
                 0.0,
                 1.0);

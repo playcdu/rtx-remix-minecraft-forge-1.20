@@ -5,54 +5,116 @@
 package com.nvidia.rtxremix.minecraft.block;
 
 import com.nvidia.rtxremix.minecraft.RtxRemixCommonMod;
-import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry; // PORT: Fabric API
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking; // PORT: Fabric API
-import net.minecraft.network.RegistryByteBuf; // PORT: no 1.20.1 equivalent
-import net.minecraft.network.codec.PacketCodec; // PORT: no 1.20.1 equivalent
-import net.minecraft.network.packet.CustomPayload; // PORT: no 1.20.1 equivalent
+import net.minecraft.network.Connection;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraftforge.network.NetworkDirection;
+import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.network.NetworkRegistry;
+import net.minecraftforge.network.simple.SimpleChannel;
 
-/** One validated control edit from an open Copper Beacon screen. */
-public record CopperBeaconUpdatePayload(int syncId, Field field, float value)
-        implements CustomPayload {
+import java.util.Optional;
+import java.util.function.Supplier;
 
-    public static final Id<CopperBeaconUpdatePayload> ID = new Id<>(
-            new ResourceLocation(RtxRemixCommonMod.MOD_ID, "copper_beacon_update"));
-    public static final PacketCodec<RegistryByteBuf, CopperBeaconUpdatePayload> PACKET_CODEC =
-            new PacketCodec<>() {
-                @Override
-                public CopperBeaconUpdatePayload decode(RegistryByteBuf buffer) {
-                    return new CopperBeaconUpdatePayload(
-                            buffer.readVarInt(),
-                            Field.byId(buffer.readVarInt()),
-                            buffer.readFloat());
-                }
+/**
+ * One validated control edit from an open Copper Beacon screen.
+ *
+ * <p>This class also owns the mod's Forge {@link SimpleChannel}, the
+ * counterpart of Fabric's payload registry. The channel accepts a peer that
+ * lacks it ({@link NetworkRegistry#acceptMissingOr}) on both sides, because the
+ * renderer is a client mod first: a client with the mod must be able to join a
+ * server without it, and a server with it must accept vanilla-channel clients.
+ * Against such a peer the beacon screen never opens remotely, and
+ * {@link #canSend} keeps a locally open one from sending.
+ */
+public record CopperBeaconUpdatePayload(int syncId, Field field, float value) {
 
-                @Override
-                public void encode(
-                        RegistryByteBuf buffer, CopperBeaconUpdatePayload payload) {
-                    buffer.writeVarInt(payload.syncId);
-                    buffer.writeVarInt(payload.field.ordinal());
-                    buffer.writeFloat(payload.value);
-                }
-            };
+    /** Bumped whenever a message on {@link #CHANNEL} changes its wire format. */
+    public static final String PROTOCOL_VERSION = "1";
 
+    public static final ResourceLocation CHANNEL_ID =
+            new ResourceLocation(RtxRemixCommonMod.MOD_ID, "main");
+
+    private static final int MESSAGE_ID = 0;
+
+    private static SimpleChannel channel;
+
+    /**
+     * Creates the channel and registers the update message. Call once from the
+     * common mod constructor, on both sides, before Forge locks the network
+     * registry.
+     */
     public static void register() {
-        PayloadTypeRegistry.playC2S().register(ID, PACKET_CODEC);
-        ServerPlayNetworking.registerGlobalReceiver(ID, (payload, context) ->
-                context.server().execute(() -> {
-                    if (context.player().currentScreenHandler
-                                    instanceof CopperBeaconScreenHandler handler
-                            && handler.syncId == payload.syncId
-                            && handler.canUse(context.player())) {
-                        handler.applyUpdate(payload.field, payload.value);
-                    }
-                }));
+        if (channel != null) {
+            return;
+        }
+        SimpleChannel created = NetworkRegistry.newSimpleChannel(
+                CHANNEL_ID,
+                () -> PROTOCOL_VERSION,
+                NetworkRegistry.acceptMissingOr(PROTOCOL_VERSION),
+                NetworkRegistry.acceptMissingOr(PROTOCOL_VERSION));
+        created.registerMessage(
+                MESSAGE_ID,
+                CopperBeaconUpdatePayload.class,
+                CopperBeaconUpdatePayload::encode,
+                CopperBeaconUpdatePayload::decode,
+                CopperBeaconUpdatePayload::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        channel = created;
     }
 
-    @Override
-    public Id<? extends CustomPayload> getId() {
-        return ID;
+    /** The mod's network channel, or null before {@link #register()} ran. */
+    public static SimpleChannel channel() {
+        return channel;
+    }
+
+    /**
+     * Whether the server at the other end of {@code connection} speaks this
+     * channel. False on a server without the mod.
+     */
+    public static boolean canSend(Connection connection) {
+        return channel != null && connection != null && channel.isRemotePresent(connection);
+    }
+
+    /** Sends {@code payload} to the server. Client side only. */
+    public static void send(CopperBeaconUpdatePayload payload) {
+        if (channel != null) {
+            channel.sendToServer(payload);
+        }
+    }
+
+    public void encode(FriendlyByteBuf buffer) {
+        buffer.writeVarInt(syncId);
+        buffer.writeVarInt(field.ordinal());
+        buffer.writeFloat(value);
+    }
+
+    public static CopperBeaconUpdatePayload decode(FriendlyByteBuf buffer) {
+        return new CopperBeaconUpdatePayload(
+                buffer.readVarInt(),
+                Field.byId(buffer.readVarInt()),
+                buffer.readFloat());
+    }
+
+    /**
+     * Applies the edit on the server thread, only to the sender's open beacon
+     * menu with the matching sync id, and only while that menu is still valid.
+     * Each setter clamps and sanitizes its value.
+     */
+    public void handle(Supplier<NetworkEvent.Context> contextSupplier) {
+        NetworkEvent.Context context = contextSupplier.get();
+        ServerPlayer player = context.getSender();
+        if (player != null) {
+            context.enqueueWork(() -> {
+                if (player.containerMenu instanceof CopperBeaconScreenHandler handler
+                        && handler.containerId == syncId
+                        && handler.stillValid(player)) {
+                    handler.applyUpdate(field, value);
+                }
+            });
+        }
+        context.setPacketHandled(true);
     }
 
     public enum Field {

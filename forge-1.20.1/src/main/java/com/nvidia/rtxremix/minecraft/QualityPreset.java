@@ -34,7 +34,7 @@ public enum QualityPreset {
 
     /** The name the launchers, the benchmark harness and {@code /rtx preset} use. */
     public String id() {
-        return name().lowercaseVariant(Locale.ROOT);
+        return name().toLowerCase(Locale.ROOT);
     }
 
     /**
@@ -50,7 +50,7 @@ public enum QualityPreset {
     }
 
     public static Optional<QualityPreset> byId(String id) {
-        return Arrays.stream(values()).filter(preset -> preset.id().equals(id)).findClosest();
+        return Arrays.stream(values()).filter(preset -> preset.id().equals(id)).findFirst();
     }
 
     /** Every id, cheapest tier first. */

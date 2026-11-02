@@ -24,11 +24,16 @@ public final class SpotLightCreativeTab {
 
     @SubscribeEvent
     public static void onBuildContents(BuildCreativeModeTabContentsEvent event) {
-        if (event.getTabKey() != CreativeModeTabs.FUNCTIONAL_BLOCKS) {
+        if (!CreativeModeTabs.FUNCTIONAL_BLOCKS.equals(event.getTabKey())) {
             return;
         }
+        // Tabs are rebuilt on joining a world. On a server without this mod Forge
+        // drops these items from the synced registry and their registry objects
+        // are empty, so only present items are offered.
         for (RegistryObject<Item> item : SpotLightBlock.creativeTabItems()) {
-            event.accept(item);
+            if (item.isPresent()) {
+                event.accept(item.get());
+            }
         }
     }
 }

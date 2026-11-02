@@ -79,7 +79,7 @@ public class LightManager {
     private static final float HELD_LIGHT_FORWARD_OFFSET = 0.35f;
     private static final float HELD_LIGHT_SIDE_OFFSET = 0.38f;
     private static final float HELD_LIGHT_HEIGHT_OFFSET = 0.88f;
-    private static final BlockPos ITEM_LIGHT_RULE_POS = BlockPos.ORIGIN;
+    private static final BlockPos ITEM_LIGHT_RULE_POS = BlockPos.ZERO;
     private static final float[] ITEM_LIGHT_RULE_CENTROID = {0.5f, 0.5f, 0.5f};
     /** Floor for a display beacon's emitter radius, so a tiny scale cannot collapse it to a point. */
     private static final float MIN_DISPLAY_BEACON_RADIUS = 0.01f;
@@ -141,7 +141,7 @@ public class LightManager {
 
     public LightManager(RemixRenderer renderer) {
         this.renderer = renderer;
-        LOGGER.printDebugLog("Light manager initialized");
+        LOGGER.info("Light manager initialized");
     }
 
     public static float getSunIntensity() {
@@ -214,7 +214,7 @@ public class LightManager {
                 EntityLightSpec spec = itemLightSpec(itemEntity.getItem());
                 if (spec != null) {
                     ensureEntityLight(
-                            entity, spec, null, EntityLightKey.item(entity.get3DDataValue()));
+                            entity, spec, null, EntityLightKey.item(entity.getId()));
                 }
             } else if (entity instanceof LivingEntity living) {
                 if (isLocalFirstPersonPlayer(living)) {
@@ -223,9 +223,9 @@ public class LightManager {
                     localFirstPersonRigUpdated = true;
                 } else {
                     updateHandLight(living, EquipmentSlot.MAINHAND,
-                            EntityLightKey.mainHand(entity.get3DDataValue()), tickDelta);
+                            EntityLightKey.mainHand(entity.getId()), tickDelta);
                     updateHandLight(living, EquipmentSlot.OFFHAND,
-                            EntityLightKey.offHand(entity.get3DDataValue()), tickDelta);
+                            EntityLightKey.offHand(entity.getId()), tickDelta);
                 }
             } else if (entity instanceof Display.BlockDisplay display) {
                 ensureDisplayBeaconLight(display, tickDelta);
@@ -234,7 +234,7 @@ public class LightManager {
 
         double beaconAnimationTick = CopperBeaconAnimationClock.sample(world, tickDelta);
         for (CopperBeaconBlockEntity beacon : CopperBeaconBlockEntity.loaded()) {
-            if (!beacon.isRemoved() && beacon.level() == world) {
+            if (!beacon.isRemoved() && beacon.getLevel() == world) {
                 ensurePlacedBeaconLight(beacon, beaconAnimationTick);
             }
         }
@@ -253,7 +253,7 @@ public class LightManager {
             var e = it.next();
             if (!seenEntityKeys.contains(e.getKey())) {
                 RemixLight light = e.getValue();
-                if (light != null && !light.isDeleted()) light.onDestroyed();
+                if (light != null && !light.isDeleted()) light.destroy();
                 it.remove();
             }
         }
@@ -264,7 +264,7 @@ public class LightManager {
             if (!seenPlacedBeacons.contains(entry.getKey())) {
                 RemixLight light = entry.getValue();
                 if (light != null && !light.isDeleted()) {
-                    light.onDestroyed();
+                    light.destroy();
                 }
                 beaconIterator.remove();
             }
@@ -286,15 +286,15 @@ public class LightManager {
             return;
         }
 
-        BlockState state = beacon.getCachedState();
+        BlockState state = beacon.getBlockState();
         int luminance = state.getLightEmission();
         if (luminance <= 0) {
             return;
         }
 
         CopperBeaconPose.evaluate(
-                state.get(CopperBeaconBlock.MOUNT),
-                state.get(BlockStateProperties.FACING),
+                state.getValue(CopperBeaconBlock.MOUNT),
+                state.getValue(BlockStateProperties.FACING),
                 beacon.yawAngleAt(animationTick),
                 beacon.pitchAngleAt(animationTick),
                 scratchPlacedBeaconPose);
@@ -302,7 +302,7 @@ public class LightManager {
         Vector3f emitter = scratchPlacedBeaconPose.emitter();
         Vector3f xAxis = scratchPlacedBeaconPose.xAxis();
         Vector3f yAxis = scratchPlacedBeaconPose.yAxis();
-        BlockPos pos = beacon.getPos();
+        BlockPos pos = beacon.getBlockPos();
 
         float red = CopperBeaconBlock.BEAM_COLOR.r();
         float green = CopperBeaconBlock.BEAM_COLOR.g();
@@ -344,7 +344,7 @@ public class LightManager {
         } catch (RemixException e) {
             LOGGER.error(
                     "Failed to update Copper Beacon light at {}: {}",
-                    beacon.getPos(),
+                    beacon.getBlockPos(),
                     e.getMessage());
         }
     }
@@ -353,14 +353,14 @@ public class LightManager {
             CopperBeaconBlockEntity beacon, LightInfo info) throws RemixException {
         RemixLight existing = placedBeaconLights.get(beacon);
         if (existing != null && existing.isAlive()) {
-            RemixLightStore.get().setup(existing, info);
+            RemixLightStore.get().update(existing, info);
             return;
         }
         if (existing != null && !existing.isDeleted()) {
-            existing.onDestroyed();
+            existing.destroy();
         }
         RemixLight light = new RemixLight(info, null);
-        RemixLightStore.get().onCreated(light);
+        RemixLightStore.get().create(light);
         placedBeaconLights.put(beacon, light);
     }
 
@@ -395,10 +395,10 @@ public class LightManager {
         List<PendingAnalyticLight> pending = new ArrayList<>(2);
         collectLocalFirstPersonLight(
                 world, camera, player, EquipmentSlot.MAINHAND,
-                EntityLightKey.mainHand(player.get3DDataValue()), tickDelta, frameDtSeconds, pending);
+                EntityLightKey.mainHand(player.getId()), tickDelta, frameDtSeconds, pending);
         collectLocalFirstPersonLight(
                 world, camera, player, EquipmentSlot.OFFHAND,
-                EntityLightKey.offHand(player.get3DDataValue()), tickDelta, frameDtSeconds, pending);
+                EntityLightKey.offHand(player.getId()), tickDelta, frameDtSeconds, pending);
 
         List<FirstPersonShadowModelPlacement.LightConstraint> constraints =
                 new ArrayList<>(pending.size());
@@ -409,7 +409,7 @@ public class LightManager {
 
         firstPersonShadowModelOffset = shadowModelPlacement.resolve(
                 world, camera, player, constraints, frameDtSeconds);
-        Vec3 displacedHeadCenter = camera.getPos().add(firstPersonShadowModelOffset);
+        Vec3 displacedHeadCenter = camera.getPosition().add(firstPersonShadowModelOffset);
 
         // The rig lights surfaces but never the air. A first-person emitter is
         // locked to the camera, and the volumetric grid reuses the previous
@@ -562,11 +562,11 @@ public class LightManager {
     private void putLight(EntityLightKey key, LightInfo info) throws RemixException {
         RemixLight existing = entityLights.get(key);
         if (existing != null && existing.isAlive()) {
-            RemixLightStore.get().setup(existing, info);
+            RemixLightStore.get().update(existing, info);
         } else {
-            if (existing != null && !existing.isDeleted()) existing.onDestroyed();
+            if (existing != null && !existing.isDeleted()) existing.destroy();
             RemixLight light = new RemixLight(info, null);
-            RemixLightStore.get().onCreated(light);
+            RemixLightStore.get().create(light);
             entityLights.put(key, light);
         }
     }
@@ -584,7 +584,7 @@ public class LightManager {
      * every frame:
      *
      * <pre>{@code
-     * /summon block_display ~ ~ ~ {Tags:["lighthouse"],teleport_duration:1,
+     * /summon block_display ~ ~ ~ {Tags:["lighthouse"],
      *     block_state:{Name:"rtxremix:copper_beacon"}}
      * /execute as @e[tag=lighthouse] at @s run tp @s ~ ~ ~ ~5 ~
      * }</pre>
@@ -594,7 +594,7 @@ public class LightManager {
      * transform.
      *
      * <p>The emitter is placed by running the block-local lens point through the
-     * same transform chain {@code DisplayEntityRenderer} uses (the interpolated
+     * same transform chain {@code DisplayRenderer} uses (the interpolated
      * display transformation, then the entity's yaw/pitch), so the light stays
      * glued to the visible lens under translation, scaling, and rotation.
      *
@@ -603,7 +603,7 @@ public class LightManager {
      * correctly for one viewer and wrong for every other.
      */
     private void ensureDisplayBeaconLight(Display.BlockDisplay display, float tickDelta) {
-        Display.BlockDisplay.Data data = display.getData();
+        Display.BlockDisplay.BlockRenderState data = display.blockRenderState();
         if (data == null) return;
 
         BlockState state = data.blockState();
@@ -617,29 +617,26 @@ public class LightManager {
         Display.RenderState renderState = display.renderState();
         if (renderState == null) return;
 
-        EntityLightKey key = EntityLightKey.blockDisplay(display.get3DDataValue());
+        EntityLightKey key = EntityLightKey.blockDisplay(display.getId());
 
         Transformation transform =
-                renderState.transformation().interpolate(display.getLerpProgress(tickDelta));
+                renderState.transformation().get(display.calculateInterpolationProgress(tickDelta));
         Matrix4f matrix = transform.getMatrix();
 
-        // Matches DisplayEntityRenderer.getBillboardRotation for BillboardMode.FIXED.
-        float yaw = Mth.rotLerp(tickDelta, display.yRotO, display.getYaw());
-        float pitch = Mth.lerp(tickDelta, display.xRotO, display.getPitch());
-        Quaternionf billboard = scratchBillboard.rotationYXZ(
-                -Mth.RADIANS_PER_DEGREE * yaw,
-                Mth.RADIANS_PER_DEGREE * pitch,
-                0.0f);
+        // Matches DisplayRenderer.calculateOrientation for BillboardConstraints.FIXED,
+        // which in 1.20.1 is the entity's un-interpolated orientation (yaw and
+        // pitch are not lerped by the renderer, unlike 1.21.1).
+        Quaternionf billboard = scratchBillboard.set(display.orientation());
 
-        Direction facing = state.get(BlockStateProperties.FACING);
-        Direction mount = state.get(CopperBeaconBlock.MOUNT);
+        Direction facing = state.getValue(BlockStateProperties.FACING);
+        Direction mount = state.getValue(CopperBeaconBlock.MOUNT);
         CopperBeaconPose.evaluate(
                 mount, facing, 0.0f, 0.0f, scratchDisplayBeaconPose);
 
         Vector3f beam = scratchBeam.set(facing.getStepX(), facing.getStepY(), facing.getStepZ());
         matrix.transformDirection(beam);
-        billboard.rotate(beam);
-        if (beam.lengthSqr() < MIN_BEAM_LENGTH_SQ) return;
+        billboard.transform(beam);
+        if (beam.lengthSquared() < MIN_BEAM_LENGTH_SQ) return;
         beam.normalize();
 
         // A block_display renders its model in [0,1]^3 with the minimum corner at
@@ -650,19 +647,19 @@ public class LightManager {
                 BeaconBeam.lensLocal(mount.getStepY(), facing.getStepY()),
                 BeaconBeam.lensLocal(mount.getStepZ(), facing.getStepZ()));
         matrix.transformPosition(lens);
-        billboard.rotate(lens);
+        billboard.transform(lens);
         Vec3 origin = display.getPosition(tickDelta);
 
         Vector3f diskX = scratchDiskX.set(scratchDisplayBeaconPose.xAxis());
         matrix.transformDirection(diskX);
-        billboard.rotate(diskX);
+        billboard.transform(diskX);
         float xRadius = BeaconBeam.RADIUS * diskX.length();
         if (xRadius < MIN_DISPLAY_BEACON_RADIUS) return;
         diskX.normalize();
 
         Vector3f diskY = scratchDiskY.set(scratchDisplayBeaconPose.yAxis());
         matrix.transformDirection(diskY);
-        billboard.rotate(diskY);
+        billboard.transform(diskY);
         diskY.fma(-diskY.dot(diskX), diskX);
         float yRadius = BeaconBeam.RADIUS * diskY.length();
         if (yRadius < MIN_DISPLAY_BEACON_RADIUS) return;
@@ -792,18 +789,18 @@ public class LightManager {
                 ? capturedPosition
                 : lightPosition(holder, slot);
         Vec3 lensOffsetDirection = localFirstPerson
-                ? HeldLightPlacement.horizontalForward(holder.getYaw())
+                ? HeldLightPlacement.horizontalForward(holder.getYRot())
                 : look;
         float emitterRadius = BeaconBeam.RADIUS * viewModelScale;
         Vec3 pos = handPosition.add(
-                lensOffsetDirection.multiply(BeaconBeam.HELD_LENS_OFFSET));
+                lensOffsetDirection.scale(BeaconBeam.HELD_LENS_OFFSET));
         float coneAngle = BeaconBeam.CONE_ANGLE_DEGREES;
         if (localFirstPerson && collisionWorld != null && collisionCamera != null) {
-            Vec3 collisionOrigin = collisionCamera.getPos();
+            Vec3 collisionOrigin = collisionCamera.getPosition();
             Vec3 preferredOffset = pos.subtract(collisionOrigin);
             double preferredDistance = preferredOffset.length();
             if (preferredDistance > 1.0e-6) {
-                Vec3 collisionDirection = preferredOffset.multiply(1.0 / preferredDistance);
+                Vec3 collisionDirection = preferredOffset.scale(1.0 / preferredDistance);
                 double collisionLimitedDistance = HeldLightPlacement.collisionLimitedDistance(
                         collisionWorld,
                         holder,
@@ -812,7 +809,7 @@ public class LightManager {
                         preferredDistance,
                         emitterRadius + HeldLightPlacement.WALL_CLEARANCE);
                 pos = collisionOrigin.add(
-                        collisionDirection.multiply(collisionLimitedDistance));
+                        collisionDirection.scale(collisionLimitedDistance));
                 coneAngle = BeaconBeam.heldConeAngle(
                         collisionLimitedDistance / preferredDistance);
             }
@@ -832,7 +829,7 @@ public class LightManager {
         shaping.coneSoftness = BeaconBeam.CONE_SOFTNESS;
         shaping.focusExponent = BeaconBeam.FOCUS_EXPONENT;
 
-        float yawRadians = holder.getYaw() * Mth.RADIANS_PER_DEGREE;
+        float yawRadians = holder.getYRot() * Mth.DEG_TO_RAD;
         Vec3 diskX = new Vec3(
                 Mth.cos(yawRadians),
                 0.0,
@@ -853,19 +850,19 @@ public class LightManager {
 
     private Vec3 lightPosition(Entity entity, EquipmentSlot lightSlot) {
         if (lightSlot != null && entity instanceof LivingEntity living) {
-            float yawRad = living.getVisualRotationYInDegrees() * Mth.RADIANS_PER_DEGREE;
+            float yawRad = living.yBodyRot * Mth.DEG_TO_RAD;
             double forwardX = -Mth.sin(yawRad);
             double forwardZ = Mth.cos(yawRad);
             double rightX = forwardZ;
             double rightZ = -forwardX;
             double sideSign = handSideSign(living, lightSlot);
-            return entity.getPos().add(
+            return entity.position().add(
                     forwardX * HELD_LIGHT_FORWARD_OFFSET + rightX * sideSign * HELD_LIGHT_SIDE_OFFSET,
                     HELD_LIGHT_HEIGHT_OFFSET,
                     forwardZ * HELD_LIGHT_FORWARD_OFFSET + rightZ * sideSign * HELD_LIGHT_SIDE_OFFSET);
         }
 
-        return entity.getPos().add(0, entity.getBbHeight() * 0.75, 0);
+        return entity.position().add(0, entity.getBbHeight() * 0.75, 0);
     }
 
     private static boolean isLocalFirstPersonPlayer(LivingEntity holder) {
@@ -1038,7 +1035,7 @@ public class LightManager {
         // evaluating them would light a permanent noon or midnight that vanilla never draws.
         skyLightState = world.effects().skyType() == DimensionSpecialEffects.SkyType.NORMAL
                 ? evaluateSkyLightState(
-                        world.getSkyAngle(0f),
+                        world.getTimeOfDay(0f),
                         world.getRainLevel(0.0f),
                         world.getThunderLevel(0.0f))
                 : SkyLightState.empty();
@@ -1071,15 +1068,15 @@ public class LightManager {
                 .build();
 
         if (light != null && light.isAlive()) {
-            RemixLightStore.get().setup(light, info);
+            RemixLightStore.get().update(light, info);
             return light;
         }
 
         if (light != null && !light.isDeleted()) {
-            light.onDestroyed();
+            light.destroy();
         }
         RemixLight created = new RemixLight(info, null);
-        RemixLightStore.get().onCreated(created);
+        RemixLightStore.get().create(created);
         return created;
     }
 
@@ -1217,10 +1214,10 @@ public class LightManager {
 
     public void clear() {
         for (RemixLight light : entityLights.values())
-            if (!light.isDeleted()) light.onDestroyed();
+            if (!light.isDeleted()) light.destroy();
         entityLights.clear();
         for (RemixLight light : placedBeaconLights.values())
-            if (!light.isDeleted()) light.onDestroyed();
+            if (!light.isDeleted()) light.destroy();
         placedBeaconLights.clear();
         seenPlacedBeacons.clear();
         lightOwnerIds.clear();
@@ -1230,16 +1227,16 @@ public class LightManager {
         lastEntityLightUpdateNanos = 0L;
 
         if (sunLight != null && !sunLight.isDeleted()) {
-            sunLight.onDestroyed();
+            sunLight.destroy();
             sunLight = null;
         }
         if (moonLight != null && !moonLight.isDeleted()) {
-            moonLight.onDestroyed();
+            moonLight.destroy();
             moonLight = null;
         }
 
         skyLightState = SkyLightState.empty();
-        LOGGER.printDebugLog("Light manager cleared");
+        LOGGER.info("Light manager cleared");
     }
 
     public record SkyLightState(

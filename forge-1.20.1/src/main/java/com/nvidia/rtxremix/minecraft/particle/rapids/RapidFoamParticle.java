@@ -4,8 +4,6 @@
  */
 package com.nvidia.rtxremix.minecraft.particle.rapids;
 
-import net.fabricmc.api.EnvType; // PORT: Fabric API
-import net.fabricmc.api.Environment; // PORT: Fabric API
 import net.minecraft.client.particle.Particle;
 import net.minecraft.client.particle.ParticleProvider;
 import net.minecraft.client.particle.ParticleRenderType;
@@ -13,16 +11,18 @@ import net.minecraft.client.particle.TextureSheetParticle;
 import net.minecraft.client.particle.SpriteSet;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.particles.SimpleParticleType;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 
-@net.minecraftforge.api.distmarker.OnlyIn(net.minecraftforge.api.distmarker.Dist.CLIENT)
+@OnlyIn(Dist.CLIENT)
 public class RapidFoamParticle extends TextureSheetParticle {
     private RapidFoamParticle(ClientLevel world, double x, double y, double z,
                               double velocityX, double velocityY, double velocityZ,
                               SpriteSet spriteProvider) {
         super(world, x, y, z);
-        this.setSprite(spriteProvider);
+        this.pickSprite(spriteProvider);
         this.setSize(0.015f, 0.015f);
-        this.scale *= this.random.nextFloat() * 0.45f + 0.35f;
+        this.quadSize *= this.random.nextFloat() * 0.45f + 0.35f;
         this.lifetime = 14 + this.random.nextInt(22);
         this.gravity = 1.25f;
         this.friction = 0.95f;
@@ -33,7 +33,7 @@ public class RapidFoamParticle extends TextureSheetParticle {
     }
 
     @Override
-    public ParticleRenderType getType() {
+    public ParticleRenderType getRenderType() {
         return ParticleRenderType.PARTICLE_SHEET_OPAQUE;
     }
 
@@ -45,7 +45,7 @@ public class RapidFoamParticle extends TextureSheetParticle {
         }
     }
 
-    @net.minecraftforge.api.distmarker.OnlyIn(net.minecraftforge.api.distmarker.Dist.CLIENT)
+    @OnlyIn(Dist.CLIENT)
     public static final class Factory implements ParticleProvider<SimpleParticleType> {
         private final SpriteSet spriteProvider;
 

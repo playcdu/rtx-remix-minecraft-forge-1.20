@@ -17,17 +17,22 @@ import java.util.function.BooleanSupplier;
 /**
  * Adds lightweight profiling scopes around client-world work that contributes
  * to Remix frame cost.
+ *
+ * <p>The scope names keep the Fabric build's {@code ClientWorld.*} spelling so
+ * captures from both builds compare in the same tooling. Embeddium overwrites
+ * {@code doAnimateTick}, the per-sample body; {@code animateTick}, which loops
+ * over it, is still vanilla's, so both hooks here stay on vanilla code.
  */
 @Mixin(ClientLevel.class)
 public abstract class ClientWorldMixin {
-    
+
     private static final ThreadLocal<ProfileScope> rtxremix$worldTickScope = new ThreadLocal<>();
     private static final ThreadLocal<ProfileScope> rtxremix$entityTickScope = new ThreadLocal<>();
     private static final ThreadLocal<ProfileScope> rtxremix$randomDisplayTickScope = new ThreadLocal<>();
 
     @Inject(method = "tick", at = @At("HEAD"))
     private void rtxremix$tickHead(BooleanSupplier shouldKeepTicking, CallbackInfo ci) {
-        rtxremix$openScope(rtxremix$worldTickScope, ProfileScope.beginJfrOnly("ClientLevel.tick")
+        rtxremix$openScope(rtxremix$worldTickScope, ProfileScope.beginJfrOnly("ClientWorld.tick")
                 .plotOnClose("Java.ClientWorld.tick.ms"));
     }
 
@@ -39,7 +44,7 @@ public abstract class ClientWorldMixin {
     @Inject(method = "tickEntities", at = @At("HEAD"))
     private void rtxremix$tickEntitiesHead(CallbackInfo ci) {
         int entityCount = ((ClientLevel) (Object) this).getEntityCount();
-        rtxremix$openScope(rtxremix$entityTickScope, ProfileScope.beginJfrOnly("ClientLevel.tickEntities")
+        rtxremix$openScope(rtxremix$entityTickScope, ProfileScope.beginJfrOnly("ClientWorld.tickEntities")
                 .entityCount(entityCount)
                 .plotOnClose("Java.ClientWorld.tickEntities.ms"));
     }
@@ -51,7 +56,7 @@ public abstract class ClientWorldMixin {
 
     @Inject(method = "animateTick", at = @At("HEAD"))
     private void rtxremix$randomBlockDisplayHead(int centerX, int centerY, int centerZ, CallbackInfo ci) {
-        rtxremix$openScope(rtxremix$randomDisplayTickScope, ProfileScope.beginJfrOnly("ClientLevel.randomBlockDisplayTicks")
+        rtxremix$openScope(rtxremix$randomDisplayTickScope, ProfileScope.beginJfrOnly("ClientWorld.randomBlockDisplayTicks")
                 .captureCount(1334)
                 .plotOnClose("Java.ClientWorld.randomBlockDisplayTicks.ms"));
     }

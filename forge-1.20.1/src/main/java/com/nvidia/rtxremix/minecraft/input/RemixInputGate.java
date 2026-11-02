@@ -30,7 +30,7 @@ public final class RemixInputGate {
     private static final String HIDDEN_MENU = "0";
     /** {@link #HIDDEN_MENU} as {@code GetConfigVariableResolved} writes it, in UTF-8 with a NUL byte. */
     private static final byte[] RESOLVED_HIDDEN_MENU =
-            (HIDDEN_MENU + '\0').asByteArray(StandardCharsets.UTF_8);
+            (HIDDEN_MENU + '\0').getBytes(StandardCharsets.UTF_8);
     /**
      * Frames after which an own write that no read agrees with is reported and no longer waited for.
      * This is far longer than Remix takes to resolve a write, so a write unresolved this long is most
