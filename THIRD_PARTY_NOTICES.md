@@ -8,7 +8,8 @@ locations given.
 
 ### Gradle wrapper
 
-- Files: `gradlew.bat`, `gradle/wrapper/`, `forge-1.12.2/gradlew*`, `forge-1.12.2/gradle/wrapper/`
+- Files: `gradlew.bat`, `gradle/wrapper/`, `forge-1.12.2/gradlew*`, `forge-1.12.2/gradle/wrapper/`,
+  `forge-1.20.1/gradlew*`, `forge-1.20.1/gradle/wrapper/`
 - Copyright Gradle Inc. and the original authors
 - License: Apache License, Version 2.0 (see [LICENSE](LICENSE))
 - Source: https://github.com/gradle/gradle
@@ -19,6 +20,11 @@ The Forge 1.12.2 JAR bundles JOML 1.10.5, copyright JOML contributors,
 under the MIT license. The dependency's unmodified license is retained as
 `META-INF/licenses/JOML-LICENSE.txt` inside the Forge JAR.
 Source: https://github.com/JOML-CI/JOML/tree/1.10.5
+
+The Forge 1.20.1 JAR nests MixinExtras 0.4.1 (`mixinextras-forge`), copyright
+LlamaLad7, under the MIT license, as a jar-in-jar under `META-INF/jarjar/`.
+The nested JAR is unmodified and carries its license as `LICENSE_MixinExtras`.
+Source: https://github.com/LlamaLad7/MixinExtras/tree/0.4.1
 
 ## Redistributed binaries (packaged releases)
 

@@ -1,0 +1,215 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Distributable packaging for the Forge 1.20.1 port. The JAR carries the same
+// native payload, in the same layout, as the Fabric package in the root build,
+// because NativeExtractor reads it from the same paths:
+//
+//   native/remix-sdk-{win64|arm64}/   pinned runtime plus the JNI bridge
+//   native/rtx.conf                   mod-owned runtime config
+//   native/rtx-remix/                 author-owned conf payload
+//   native/textures/                  runtime DDS textures
+//   packaging/licenses/               license texts for the redistributed payload
+//
+// The runtime directories under ../remix-runtime/ are Packman junctions into a
+// shared cache: they are read here and never written. The bridge is built by
+// the shared batch script into ../build/native/{arch}/, outside every junction.
+
+def archProperty = project.findProperty('arch')
+if (archProperty && !(archProperty in ['win64', 'arm64'])) {
+    throw new GradleException("Invalid -Parch value: '${archProperty}'. Use win64 or arm64 (or omit for both).")
+}
+def packageArches = archProperty ? [archProperty] : ['win64', 'arm64']
+def repoRoot = file('..')
+def runtimeDir = { String arch -> new File(repoRoot, "remix-runtime/${arch}") }
+def bridgeDir = { String arch -> new File(repoRoot, "build/native/${arch}") }
+def runtimeTexturesDir = new File(repoRoot, 'remix-runtime/textures')
+def runtimeTextureFiles = ['overcast_thunderstorm_bc6u.dds', 'water_normals_flipbook.dds']
+def remixModsPayloadDir = new File(repoRoot, 'packaging/rtx-remix')
+def licensesPayloadDir = new File(repoRoot, 'packaging/licenses')
+def packmanDir = new File(repoRoot, 'packman')
+
+// Same exclusions as the root build: dxvk PDBs are stripped (remixbridge.pdb is
+// kept), and the 32-bit game bridge is never shipped to a Java client.
+def sdkExcluded = { String name ->
+    name == 'NvRemixBridge.exe' || name == 'NvRemixBridge.pdb' ||
+            (name.endsWith('.pdb') && name != 'remixbridge.pdb')
+}
+
+['win64', 'arm64'].each { arch ->
+    def suffix = arch == 'win64' ? 'Win64' : 'Arm64'
+    tasks.register("compileNative${suffix}", Exec) {
+        description = "Compiles remixbridge.dll for ${arch} into ../build/native/${arch}"
+        group = 'build'
+        workingDir new File(repoRoot, 'rtxremix-java/native')
+        commandLine 'cmd', '/c', new File(repoRoot, 'rtxremix-java/native/build_native.bat').absolutePath,
+                arch == 'win64' ? 'x64' : 'arm64'
+        inputs.files new File(repoRoot, 'rtxremix-java/native/build_native.bat'),
+                new File(repoRoot, 'rtxremix-java/native/remixbridge.cpp'),
+                new File(repoRoot, 'rtxremix-java/native/include/remix_c.h')
+        outputs.files new File(bridgeDir(arch), 'remixbridge.dll'), new File(bridgeDir(arch), 'remixbridge.pdb')
+    }
+
+    // Fetches the pinned runtime only when nothing is staged; an existing
+    // directory or a local snapshot belongs to the developer and is left alone.
+    tasks.register("fetchRuntimeSdk${suffix}") {
+        description = "Fetches the pinned ${arch} runtime when it is not staged"
+        group = 'build'
+        def target = runtimeDir(arch)
+        onlyIf { !new File(target, '.local-sdk-source').exists() && !target.directory }
+        doLast {
+            def manifest = new File(packmanDir, 'remix-sdk.packman.xml')
+            def projectXml = new groovy.xml.XmlParser().parse(manifest)
+            def dependency = projectXml.dependency.find { it.attribute('name') == "remix-sdk-${arch}" }
+            if (dependency == null) throw new GradleException("remix-sdk-${arch} is not pinned in ${manifest}")
+            dependency.attributes()['linkPath'] = target.absolutePath.replace('\\', '/')
+            def filtered = new Node(null, 'project', [toolsVersion: '7.6'])
+            filtered.append(dependency)
+            def temporary = File.createTempFile('.packman-fetch-', '.tmp.xml', repoRoot)
+            try {
+                temporary.setText(groovy.xml.XmlUtil.serialize(filtered), 'UTF-8')
+                logger.lifecycle("Pulling remix-sdk-${arch} -> ${target}")
+                project.exec {
+                    workingDir packmanDir
+                    commandLine 'cmd', '/d', '/c', new File(packmanDir, 'packman.cmd').absolutePath,
+                            'pull', temporary.absolutePath, '-p', 'windows-x86_64'
+                }
+            } finally {
+                temporary.delete()
+            }
+        }
+    }
+}
+
+tasks.register('fetchRuntimeTextures', Exec) {
+    description = 'Pulls the runtime textures pinned in packman/textures.packman.xml'
+    group = 'build'
+    def manifest = new File(packmanDir, 'textures.packman.xml')
+    inputs.file(manifest)
+    workingDir packmanDir
+    commandLine 'cmd', '/d', '/c', '.\\packman.cmd', 'pull', manifest.absolutePath
+    doLast {
+        def missing = runtimeTextureFiles.findAll { name ->
+            def texture = new File(runtimeTexturesDir, name)
+            !texture.isFile() || texture.length() == 0
+        }
+        if (!missing.isEmpty()) {
+            throw new GradleException("The runtime textures at ${runtimeTexturesDir} are missing ${missing.join(', ')}. " +
+                    'Delete that folder and build again, and Packman downloads the package afresh.')
+        }
+    }
+}
+
+// One fat JAR holds every selected architecture, so both must come from the same
+// kind of source (both Packman, or both local snapshots), as in the root build.
+def checkSourceHomogeneity = { ->
+    if (packageArches.size() < 2) return
+    def kinds = packageArches.collect { new File(runtimeDir(it), '.local-sdk-source').exists() ? 'local' : 'managed' }
+    if (kinds.unique().size() > 1) {
+        throw new GradleException('A dual-architecture JAR needs both runtimes from the same source. ' +
+                'Build one architecture with -Parch=win64 or -Parch=arm64, or stage both the same way ' +
+                '(..\\tools\\rtx.bat sdk packman --arch all, or sdk local for each).')
+    }
+}
+
+def reobfedJar = tasks.named('jarJar').flatMap { it.archiveFile }
+def packageForgeTask = tasks.register('packageForge', Zip) {
+    description = 'Assembles the distributable Forge JAR with the selected runtimes, conf payload, textures and licenses'
+    group = 'build'
+    dependsOn 'reobfJarJar', 'fetchRuntimeTextures'
+    packageArches.each { arch ->
+        def suffix = arch == 'win64' ? 'Win64' : 'Arm64'
+        dependsOn "fetchRuntimeSdk${suffix}", "compileNative${suffix}"
+    }
+    archiveBaseName.set(base.archivesName)
+    archiveVersion.set(project.version.toString() + (archProperty ? "-${archProperty}" : ''))
+    archiveExtension.set('jar')
+    destinationDirectory.set(layout.buildDirectory.dir('distributions'))
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+    zip64 = true
+
+    from({ zipTree(reobfedJar.get().asFile) })
+    doFirst {
+        checkSourceHomogeneity()
+        packageArches.each { arch ->
+            if (!new File(runtimeDir(arch), 'd3d9.dll').isFile()) {
+                throw new GradleException("The ${arch} runtime at ${runtimeDir(arch)} has no d3d9.dll. Stage it with " +
+                        "..\\tools\\rtx.bat sdk packman --arch ${arch} (or sdk local).")
+            }
+        }
+    }
+    packageArches.each { arch ->
+        from(runtimeDir(arch)) {
+            into("native/remix-sdk-${arch}")
+            exclude { details -> !details.directory && sdkExcluded(details.name) }
+            exclude 'remixbridge.dll', 'remixbridge.pdb'
+        }
+        from(bridgeDir(arch)) {
+            into("native/remix-sdk-${arch}")
+            include 'remixbridge.dll', 'remixbridge.pdb'
+        }
+    }
+    from(new File(repoRoot, 'packaging/rtx.conf')) { into 'native' }
+    from(remixModsPayloadDir) { into 'native/rtx-remix' }
+    from(licensesPayloadDir) { into 'packaging/licenses' }
+    from(runtimeTexturesDir) {
+        into 'native/textures'
+        include runtimeTextureFiles
+    }
+    from(new File(repoRoot, 'THIRD_PARTY_NOTICES.md'))
+}
+
+def packagedArchive = packageForgeTask.flatMap { it.archiveFile }
+def verifyPackageForgeTask = tasks.register('verifyPackageForge') {
+    description = 'Verifies the Forge JAR holds exactly the selected runtimes plus the payload NativeExtractor expects'
+    group = 'verification'
+    dependsOn packageForgeTask
+    inputs.file(packagedArchive)
+    inputs.dir(remixModsPayloadDir)
+    inputs.dir(licensesPayloadDir)
+    doLast {
+        def archive = packagedArchive.get().asFile
+        def zip = new java.util.zip.ZipFile(archive)
+        try {
+            def names = zip.entries().collect { it.name }
+            def required = ['META-INF/MANIFEST.MF', 'META-INF/mods.toml', 'rtxremix.mixins.json',
+                            'rtxremix.refmap.json', 'native/rtx.conf', 'THIRD_PARTY_NOTICES.md']
+            packageArches.each { arch ->
+                required.addAll(["native/remix-sdk-${arch}/d3d9.dll", "native/remix-sdk-${arch}/remixbridge.dll",
+                                 "native/remix-sdk-${arch}/remixbridge.pdb"])
+            }
+            runtimeTextureFiles.each { required.add("native/textures/${it}".toString()) }
+            def payloadEntries = { File dir, String prefix ->
+                fileTree(dir).files.collect { prefix + dir.toPath().relativize(it.toPath()).toString().replace('\\', '/') }
+            }
+            required.addAll(payloadEntries(remixModsPayloadDir, 'native/rtx-remix/'))
+            required.addAll(payloadEntries(licensesPayloadDir, 'packaging/licenses/'))
+            def missing = required.findAll { zip.getEntry(it) == null }
+            if (!missing.isEmpty()) throw new GradleException("${archive.name} is missing ${missing.join(', ')}")
+            if (!names.any { it.startsWith('META-INF/jarjar/') && it.contains('mixinextras-forge') }) {
+                throw new GradleException("${archive.name} does not nest MixinExtras")
+            }
+            ['win64', 'arm64'].findAll { !packageArches.contains(it) }.each { arch ->
+                if (names.any { it.startsWith("native/remix-sdk-${arch}/") }) {
+                    throw new GradleException("${archive.name} unexpectedly contains native/remix-sdk-${arch}/")
+                }
+            }
+            // The runtime is built without OpenUSD Python support; an interpreter or
+            // bindings would be unused code that binary scanners flag.
+            def python = ~/(?i)native\/remix-sdk-[^\/]+\/(.*\/)?([^\/]*python[^\/]*\.dll|[^\/]*\.(pyd|pyc)|python\d*(\.\d+)?\/.*)/
+            def offender = names.find { it ==~ python }
+            if (offender != null) throw new GradleException("${archive.name} must not contain a Python runtime: ${offender}")
+            if (names.contains('README.md')) throw new GradleException('Repository resource notes must not ship')
+        } finally {
+            zip.close()
+        }
+    }
+}
+
+tasks.register('package') {
+    description = 'Builds and verifies the distributable Forge 1.20.1 JAR'
+    group = 'build'
+    dependsOn 'build', verifyPackageForgeTask
+}

@@ -1,0 +1,111 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Forge 1.20.1 port of the renderer, for the Society: Sunlit Valley modpack.
+// Standalone like ../forge-1.12.2: it compiles the shared JNI facade from
+// ../rtxremix-java/src directly and never touches the root Fabric build.
+plugins {
+    id 'java'
+    id 'net.minecraftforge.gradle' version '[6.0.24,6.2)'
+    id 'org.spongepowered.mixin' version '0.7.+'
+}
+
+// The mod version has one source of truth, the root gradle.properties.
+def rootProperties = new Properties()
+file('../gradle.properties').withInputStream { rootProperties.load(it) }
+group = 'com.nvidia.rtxremix.forge'
+version = rootProperties.getProperty('mod_version')
+base { archivesName = 'rtx-remix-forge-1.20.1' }
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+minecraft {
+    mappings channel: 'official', version: minecraft_version
+    accessTransformer = file('src/main/resources/META-INF/accesstransformer.cfg')
+}
+
+sourceSets.main.java.srcDirs += ['../rtxremix-java/src']
+
+repositories {
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+        content { includeGroup 'maven.modrinth' }
+    }
+    mavenCentral()
+}
+
+jarJar.enable()
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+
+    // MixinExtras is nested with jar-in-jar; Forge 47 does not ship it.
+    compileOnly(annotationProcessor("io.github.llamalad7:mixinextras-common:${mixinextras_version}"))
+    implementation(jarJar("io.github.llamalad7:mixinextras-forge:${mixinextras_version}")) {
+        jarJar.ranged(it, "[${mixinextras_version},)")
+    }
+
+    // Sunlit Valley ships Embeddium, which replaces vanilla's chunk builder and
+    // section visibility; terrain capture hooks its meshing task instead.
+    implementation fg.deobf("maven.modrinth:embeddium:${embeddium_version}")
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+mixin {
+    add sourceSets.main, 'rtxremix.refmap.json'
+    config 'rtxremix.mixins.json'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
+}
+
+test { useJUnitPlatform() }
+
+def gitOutput = { List<String> command ->
+    providers.exec { commandLine command; ignoreExitValue = true }.standardOutput.asText.map { it.trim() }
+}
+def gitShortHash = gitOutput(['git', 'rev-parse', '--short=7', 'HEAD'])
+def gitBranch = gitOutput(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
+
+processResources {
+    // Repository-only asset notes contain relative links, not runtime resources.
+    exclude 'README.md'
+    def props = [version: project.version, minecraft_version: minecraft_version, forge_version: forge_version]
+    inputs.properties props
+    inputs.property 'gitShortHash', gitShortHash
+    inputs.property 'gitBranch', gitBranch
+    filesMatching('META-INF/mods.toml') { expand props }
+    filesMatching('benchmark.properties') {
+        expand 'gitCommit': gitShortHash.get(), 'gitBranch': gitBranch.get()
+    }
+}
+
+// The jar-in-jar output is the mod; the plain jar is only its input.
+tasks.named('jar') { archiveClassifier = 'slim' }
+tasks.named('jarJar') { archiveClassifier = '' }
+tasks.withType(Jar).configureEach {
+    manifest {
+        attributes(
+            'Specification-Title': 'RTX Remix for Minecraft (Forge 1.20.1)',
+            'Implementation-Title': 'RTX Remix for Minecraft (Forge 1.20.1)',
+            'Implementation-Version': project.version,
+            'MixinConfigs': 'rtxremix.mixins.json'
+        )
+    }
+}
+tasks.named('jarJar') {
+    from('../LICENSE')
+    from('../NOTICE')
+}
+tasks.named('jar').configure { finalizedBy 'reobfJar' }
+tasks.named('jarJar').configure { finalizedBy 'reobfJarJar' }
+reobf { jarJar {} }
+tasks.named('assemble').configure { dependsOn 'jarJar' }
+
+apply from: 'packaging.gradle'
