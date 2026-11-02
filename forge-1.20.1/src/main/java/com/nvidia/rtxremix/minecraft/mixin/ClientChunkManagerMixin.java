@@ -41,7 +41,7 @@ public abstract class ClientChunkManagerMixin {
      */
     @Inject(method = "onLightUpdate", at = @At("HEAD"), cancellable = true)
     private void rtxremix$skipLightOnlyRebuild(LightLayer type, SectionPos pos, CallbackInfo ci) {
-        if (RtxRemixMod.isRtxEnabled()) {
+        if (RtxRemixMod.isRemixPresenting()) {
             SkippedSectionRebuilds.recordLightOnly();
             ci.cancel();
         }

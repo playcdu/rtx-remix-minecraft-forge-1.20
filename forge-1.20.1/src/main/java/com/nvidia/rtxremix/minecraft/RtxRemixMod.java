@@ -2504,6 +2504,21 @@ public class RtxRemixMod {
     public static boolean isRtxEnabled() {
         return rtxEnabled;
     }
+
+    /**
+     * Whether Remix is presenting the world: RTX is on and the renderer initialized.
+     *
+     * <p>Hooks that replace vanilla or Embeddium work, rather than merely observing
+     * it, gate on this instead of {@link #isRtxEnabled()}: the flag starts on, so a
+     * renderer that failed to start (no runtime, a bridge that would not load) must
+     * leave vanilla rendering whole instead of skipping terrain meshing it can no
+     * longer replace. Read from Embeddium's section builders and Flywheel on any
+     * thread; the renderer reference is published once, before a world loads.
+     */
+    public static boolean isRemixPresenting() {
+        RemixRenderer current = renderer;
+        return rtxEnabled && current != null && current.isInitialized();
+    }
     
     /**
      * Switches RTX capture on or off. Render thread only: the terrain reload it

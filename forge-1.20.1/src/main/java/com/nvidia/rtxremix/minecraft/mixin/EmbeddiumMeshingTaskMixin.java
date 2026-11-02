@@ -89,6 +89,9 @@ public abstract class EmbeddiumMeshingTaskMixin {
     /**
      * Whether this build captures for Remix is read once, here.
      *
+     * <p>Capture needs a running renderer as well as the RTX flag, so a renderer that
+     * failed to start leaves Embeddium meshing every section for vanilla's GL draw.
+     *
      * <p>{@code rtxEnabled} is volatile so worker threads see a toggle promptly, which
      * means every hook below would otherwise read it independently and a toggle could
      * land <em>between</em> two of them inside one build, routing some blocks of a
@@ -105,7 +108,7 @@ public abstract class EmbeddiumMeshingTaskMixin {
             ChunkBuildContext buildContext,
             CancellationToken cancellationToken,
             Operation<ChunkBuildOutput> original) {
-        if (!RtxRemixMod.isRtxEnabled()) {
+        if (!RtxRemixMod.isRemixPresenting()) {
             return original.call(buildContext, cancellationToken);
         }
 

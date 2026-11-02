@@ -174,7 +174,7 @@ def verifyPackageForgeTask = tasks.register('verifyPackageForge') {
         def zip = new java.util.zip.ZipFile(archive)
         try {
             def names = zip.entries().collect { it.name }
-            def required = ['META-INF/MANIFEST.MF', 'META-INF/mods.toml', 'rtxremix.mixins.json',
+            def required = ['META-INF/MANIFEST.MF', 'META-INF/mods.toml', 'pack.mcmeta', 'rtxremix.mixins.json',
                             'rtxremix.refmap.json', 'native/rtx.conf', 'THIRD_PARTY_NOTICES.md']
             packageArches.each { arch ->
                 required.addAll(["native/remix-sdk-${arch}/d3d9.dll", "native/remix-sdk-${arch}/remixbridge.dll",

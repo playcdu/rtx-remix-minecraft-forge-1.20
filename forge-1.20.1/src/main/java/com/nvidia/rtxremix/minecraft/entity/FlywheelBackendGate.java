@@ -4,7 +4,6 @@
  */
 package com.nvidia.rtxremix.minecraft.entity;
 
-import com.nvidia.rtxremix.minecraft.RemixRenderer;
 import com.nvidia.rtxremix.minecraft.RtxRemixMod;
 
 /**
@@ -42,11 +41,6 @@ public final class FlywheelBackendGate {
 
     /** Whether Remix is presenting the world, so Flywheel's backend must read as off. */
     public static boolean suppressFlywheel() {
-        if (!RtxRemixMod.isRtxEnabled()) {
-            return false;
-        }
-        RtxRemixMod mod = RtxRemixMod.getInstance();
-        RemixRenderer renderer = mod == null ? null : mod.getRenderer();
-        return renderer != null && renderer.isInitialized();
+        return RtxRemixMod.isRemixPresenting();
     }
 }
