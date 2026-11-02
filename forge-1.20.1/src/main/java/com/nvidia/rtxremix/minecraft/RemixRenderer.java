@@ -59,6 +59,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.material.FogType;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.client.event.RenderHighlightEvent;
+import net.minecraftforge.fml.loading.FMLConfig;
 import net.minecraftforge.fml.loading.FMLPaths;
 import org.lwjgl.glfw.GLFWNativeWin32;
 import org.lwjgl.opengl.GL;
@@ -298,7 +299,12 @@ public class RemixRenderer {
                     .hwnd(windowHandle)
                     .interopImage(true)
                     .build();
-                remixApi.startup(startupInfo);
+                try {
+                    remixApi.startup(startupInfo);
+                } catch (RemixException e) {
+                    releaseEarlyWindowAfterFailedStartup();
+                    throw e;
+                }
                 LOGGER.info("RTX Remix API started");
 
             }
@@ -425,6 +431,29 @@ public class RemixRenderer {
             LOGGER.error("Failed to initialize RTX Remix", e);
             releasePartialInitialization();
             throw new RuntimeException("RTX Remix initialization failed", e);
+        }
+    }
+
+    /**
+     * Forge's early loading window draws into the game window through OpenGL before
+     * Remix starts. NVIDIA's driver commonly presents OpenGL through a DXGI swap chain,
+     * and once the window has one Remix cannot create its Vulkan swap chain there
+     * ({@code VK_ERROR_NATIVE_WINDOW_IN_USE_KHR} in {@code remix-dxvk.log}). With the
+     * early window off, nothing presents before Remix does. FML reads the setting
+     * before any mod loads, so it is switched off for the next launch.
+     */
+    private static void releaseEarlyWindowAfterFailedStartup() {
+        try {
+            if (!FMLConfig.getBoolConfigValue(FMLConfig.ConfigValue.EARLY_WINDOW_CONTROL)) {
+                return;
+            }
+            FMLConfig.updateConfig(FMLConfig.ConfigValue.EARLY_WINDOW_CONTROL, false);
+            LOGGER.error("RTX Remix could not take over the game window, which Forge's early loading "
+                    + "window had already presented to. earlyWindowControl is now false in "
+                    + "config/fml.toml: restart the game to start Remix.");
+        } catch (RuntimeException e) {
+            LOGGER.error("RTX Remix could not take over the game window. Set earlyWindowControl = false "
+                    + "in config/fml.toml and restart the game.", e);
         }
     }
 

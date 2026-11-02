@@ -33,6 +33,12 @@ if ($Uninstall) {
             Write-Output "Re-enabled $(Split-Path -Leaf $restored)"
         }
     }
+    $fmlConfig = Join-Path $game 'config\fml.toml'
+    if (Test-Path -LiteralPath $fmlConfig) {
+        (Get-Content -LiteralPath $fmlConfig) -replace '^\s*earlyWindowControl\s*=.*', 'earlyWindowControl = true' |
+            Set-Content -LiteralPath $fmlConfig
+        Write-Output 'Turned Forge''s early loading window back on.'
+    }
     Write-Output "Removed $installedName. The extracted runtime in $game\remix-sdk is left in place; delete it to reclaim the space."
     return
 }
@@ -66,4 +72,21 @@ Get-ChildItem -LiteralPath $mods -Filter 'rtx-remix-forge-1.20.1*.jar' |
     Where-Object { $_.Name -ne $installedName } |
     ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force; Write-Output "Removed old $($_.Name)" }
 Copy-Item -LiteralPath $packageFile.FullName -Destination $installed -Force
+
+# Forge's early loading window presents through OpenGL before Remix starts, which
+# on NVIDIA leaves the window unable to host Remix's Vulkan swap chain.
+$fmlConfig = Join-Path $game 'config\fml.toml'
+if (Test-Path -LiteralPath $fmlConfig) {
+    $lines = Get-Content -LiteralPath $fmlConfig
+    if ($lines -match '^\s*earlyWindowControl\s*=') {
+        $lines = $lines -replace '^\s*earlyWindowControl\s*=.*', 'earlyWindowControl = false'
+    } else {
+        $lines += 'earlyWindowControl = false'
+    }
+    Set-Content -LiteralPath $fmlConfig -Value $lines
+} else {
+    New-Item -ItemType Directory -Force -Path (Split-Path $fmlConfig) | Out-Null
+    Set-Content -LiteralPath $fmlConfig -Value 'earlyWindowControl = false'
+}
+Write-Output 'Turned off Forge''s early loading window (config\fml.toml earlyWindowControl = false).'
 Write-Output "Installed $installed. The runtime unpacks into $game on first launch."

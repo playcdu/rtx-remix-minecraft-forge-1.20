@@ -114,6 +114,13 @@ unpacks `remix-sdk\`, `rtx.conf`, the runtime textures and the `rtx-remix\`
 conf payload into the game directory, as described in
 [AGENTS.md](../AGENTS.md#runtime-and-install-model).
 
+Turn off Forge's early loading window: `earlyWindowControl = false` in
+`config/fml.toml` (the install script does this). It draws into the game
+window through OpenGL before Remix starts, and NVIDIA's driver then refuses
+Remix a Vulkan swap chain on that window (`VK_ERROR_NATIVE_WINDOW_IN_USE_KHR`
+in `rtx-remix/logs/remix-dxvk.log`). If Remix fails to start with the early
+window on, the mod switches it off itself and asks for a restart.
+
 Run the instance on a current Java 17. The runtime's libraries are built with
 Visual Studio 2022 17.12 or newer and fail to initialize (Windows error 1114 in
 `logs/latest.log`) next to the Visual C++ runtime older than 14.40 that some
