@@ -5,6 +5,8 @@
 package com.nvidia.rtxremix.minecraft.logic;
 
 import com.nvidia.rtxremix.RemixException;
+import com.nvidia.rtxremix.minecraft.MinecraftTestBootstrap;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -32,6 +34,15 @@ import static org.junit.jupiter.api.Assertions.fail;
  * runtime needed; the layer catalog itself is plain data.
  */
 class ConfLayerDriverTest {
+
+    /**
+     * The driver keys biome layers by vanilla biome keys, and 1.20.1 creates those
+     * through the built-in registries.
+     */
+    @BeforeAll
+    static void bootstrapMinecraft() {
+        MinecraftTestBootstrap.registries();
+    }
 
     @Test
     void weatherStrengthsBeginAtZero() {
@@ -315,7 +326,7 @@ class ConfLayerDriverTest {
         // controller + 2 weather + 4 time profiles. Optional biome and zone
         // rows are discovered from disk.
         assertEquals(64, ConfLayerDriver.vanillaBiomeNames().size(),
-                "vanilla 1.21.1 biome count (BiomeKeys)");
+                "vanilla 1.20.1 biome count (Biomes)");
         assertEquals(9, ConfLayerDriver.STATIC_LAYER_TABLE.size());
         Set<String> names = new HashSet<>();
         Set<String> paths = new HashSet<>();
@@ -730,10 +741,11 @@ class ConfLayerDriverTest {
         // Catches catalog drift in both directions. Fixed rows need files;
         // discovered biome/zone files need valid stems. Only plains.conf ships
         // as the biome authoring sample.
-        Path root = Path.of("packaging", "rtx-remix", "mods", "minecraft-logic");
+        Path root = Path.of("..", "packaging", "rtx-remix", "mods", "minecraft-logic");
         assertTrue(Files.isDirectory(root),
                 "conf catalog not found at " + root.toAbsolutePath()
-                        + " (this test expects the repo root as the working directory)");
+                        + " (this test expects the forge-1.20.1 project as the working directory,"
+                        + " beside the shared packaging/)");
         Set<String> tablePaths = new HashSet<>();
         for (var spec : ConfLayerDriver.STATIC_LAYER_TABLE) {
             tablePaths.add(spec.confPath());

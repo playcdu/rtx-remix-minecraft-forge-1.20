@@ -28,7 +28,7 @@ class PostProcessingSettingsTest {
     @Test
     void javaDefaultsMatchAuthoredBaseline() throws Exception {
         Map<String, String> baseline = new HashMap<>();
-        for (String line : Files.readAllLines(Path.of("packaging", "rtx.conf"))) {
+        for (String line : Files.readAllLines(Path.of("..", "packaging", "rtx.conf"))) {
             String[] parts = line.split("=", 2);
             if (parts.length == 2) {
                 baseline.put(parts[0].trim(), parts[1].trim());

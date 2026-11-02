@@ -111,11 +111,11 @@ class CopperBeaconBlockEntityTest {
     @Test
     void everyBeaconModelResourceIsPresentAndValidJson() {
         for (String path : new String[]{
-                "assets/rtx-remix-renderer/models/block/copper_beacon.json",
-                "assets/rtx-remix-renderer/models/block/copper_beacon_wall.json",
-                "assets/rtx-remix-renderer/models/block/copper_beacon_complete.json",
-                "assets/rtx-remix-renderer/models/item/copper_beacon.json",
-                "assets/rtx-remix-renderer/blockstates/copper_beacon.json"}) {
+                "assets/rtxremix/models/block/copper_beacon.json",
+                "assets/rtxremix/models/block/copper_beacon_wall.json",
+                "assets/rtxremix/models/block/copper_beacon_complete.json",
+                "assets/rtxremix/models/item/copper_beacon.json",
+                "assets/rtxremix/blockstates/copper_beacon.json"}) {
             var stream = CopperBeaconBlockEntityTest.class.getClassLoader()
                     .getResourceAsStream(path);
             assertNotNull(stream, path);
@@ -128,8 +128,8 @@ class CopperBeaconBlockEntityTest {
     @Test
     void lensTexturesMatchTheSixPixelGeometry() throws IOException {
         for (String path : new String[]{
-                "assets/rtx-remix-renderer/textures/block/copper_beacon_lens.png",
-                "assets/rtx-remix-renderer/textures/block/copper_beacon_lens_s.png"}) {
+                "assets/rtxremix/textures/block/copper_beacon_lens.png",
+                "assets/rtxremix/textures/block/copper_beacon_lens_s.png"}) {
             try (var stream = CopperBeaconBlockEntityTest.class.getClassLoader()
                     .getResourceAsStream(path)) {
                 assertNotNull(stream, path);

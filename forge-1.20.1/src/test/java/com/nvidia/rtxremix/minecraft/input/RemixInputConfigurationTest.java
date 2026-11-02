@@ -42,7 +42,7 @@ class RemixInputConfigurationTest {
 
     private static Map<String, String> readConfig() throws Exception {
         Map<String, String> config = new HashMap<>();
-        for (String rawLine : Files.readAllLines(Path.of("packaging", "rtx.conf"))) {
+        for (String rawLine : Files.readAllLines(Path.of("..", "packaging", "rtx.conf"))) {
             String line = rawLine.strip();
             if (line.isEmpty() || line.startsWith("#")) {
                 continue;

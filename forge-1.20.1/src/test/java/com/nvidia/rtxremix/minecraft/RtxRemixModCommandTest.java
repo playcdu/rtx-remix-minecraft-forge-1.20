@@ -6,7 +6,7 @@ package com.nvidia.rtxremix.minecraft;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.ParseResults;
-import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource; // PORT: Fabric API
+import net.minecraft.commands.CommandSourceStack;
 import org.junit.jupiter.api.Test;
 
 import java.util.Set;
@@ -21,21 +21,21 @@ class RtxRemixModCommandTest {
 
     @Test
     void cameraPlaySupportsDefaultTimeAndExplicitClockModes() {
-        CommandDispatcher<FabricClientCommandSource> dispatcher = cameraDispatcher();
+        CommandDispatcher<CommandSourceStack> dispatcher = cameraDispatcher();
 
         assertParses(dispatcher, "camera play demo");
         assertParses(dispatcher, "camera play demo time");
         assertParses(dispatcher, "camera play demo fixed-60");
 
-        ParseResults<FabricClientCommandSource> invalid =
+        ParseResults<CommandSourceStack> invalid =
                 dispatcher.parse("camera play demo bogus", null);
         assertTrue(invalid.getReader().canRead() || !invalid.getExceptions().isEmpty());
     }
 
     @Test
     void cameraPlaySuggestsOnlySupportedClockModes() {
-        CommandDispatcher<FabricClientCommandSource> dispatcher = cameraDispatcher();
-        ParseResults<FabricClientCommandSource> parsed =
+        CommandDispatcher<CommandSourceStack> dispatcher = cameraDispatcher();
+        ParseResults<CommandSourceStack> parsed =
                 dispatcher.parse("camera play demo ", null);
 
         Set<String> suggestions = dispatcher.getCompletionSuggestions(parsed).join()
@@ -49,7 +49,7 @@ class RtxRemixModCommandTest {
 
     @Test
     void omittedModeRemainsExecutableAtCameraNameNode() {
-        CommandDispatcher<FabricClientCommandSource> dispatcher = cameraDispatcher();
+        CommandDispatcher<CommandSourceStack> dispatcher = cameraDispatcher();
         var nameNode = dispatcher.getRoot()
                 .getChild("camera")
                 .getChild("play")
@@ -61,17 +61,17 @@ class RtxRemixModCommandTest {
         assertNotNull(nameNode.getChild("fixed-60").getCommand());
     }
 
-    private static CommandDispatcher<FabricClientCommandSource> cameraDispatcher() {
-        CommandDispatcher<FabricClientCommandSource> dispatcher = new CommandDispatcher<>();
+    private static CommandDispatcher<CommandSourceStack> cameraDispatcher() {
+        CommandDispatcher<CommandSourceStack> dispatcher = new CommandDispatcher<>();
         dispatcher.register(RtxRemixMod.cameraCommand());
         return dispatcher;
     }
 
     private static void assertParses(
-            CommandDispatcher<FabricClientCommandSource> dispatcher,
+            CommandDispatcher<CommandSourceStack> dispatcher,
             String command
     ) {
-        ParseResults<FabricClientCommandSource> parsed = dispatcher.parse(command, null);
+        ParseResults<CommandSourceStack> parsed = dispatcher.parse(command, null);
         assertFalse(parsed.getReader().canRead(), command);
         assertTrue(parsed.getExceptions().isEmpty(), command);
     }

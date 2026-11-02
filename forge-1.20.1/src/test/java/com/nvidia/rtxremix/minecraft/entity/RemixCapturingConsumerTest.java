@@ -12,9 +12,9 @@ import net.minecraft.client.renderer.block.model.BakedQuad;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.renderer.texture.SpriteContents;
+import net.minecraft.client.resources.metadata.animation.AnimationMetadataSection;
 import net.minecraft.client.resources.metadata.animation.FrameSize;
 import com.mojang.blaze3d.vertex.PoseStack;
-import net.minecraft.server.packs.resources.ResourceMetadata;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.core.Direction;
 import org.joml.Matrix4f;
@@ -51,7 +51,7 @@ class RemixCapturingConsumerTest {
         RemixCapturingConsumer consumer = new RemixCapturingConsumer(null, true);
         Matrix4f pose = new Matrix4f()
                 .translate(3.0f, 4.0f, 5.0f)
-                .yRot(0.25f);
+                .rotateY(0.25f);
 
         consumer.vertex(pose, -64.0f, 64.0f, -0.01f);
         consumer.finishOpenVertex();
@@ -169,7 +169,7 @@ class RemixCapturingConsumerTest {
             for (int x = 0; x < 8; x++) image.setPixelRGBA(x, y, rows[y].charAt(x) == '#' ? 0xFF808080 : 0);
         }
         return new SpriteContents(new ResourceLocation("minecraft", id), new FrameSize(8, 8), image,
-                ResourceMetadata.NONE);
+                AnimationMetadataSection.EMPTY);
     }
 
     private static TextureAtlasSprite atlasSprite(SpriteContents contents) {
@@ -180,8 +180,8 @@ class RemixCapturingConsumerTest {
     private static void cardFaces(RemixCapturingConsumer consumer, TextureAtlasSprite sprite) {
         PoseStack.Pose pose = new PoseStack().last();
         float[] ones = {1, 1, 1, 1};
-        consumer.quad(pose, cardFace(sprite, 7.5f / 16, Direction.NORTH, false), ones, 1, 1, 1, 1, new int[4], OverlayTexture.DEFAULT_UV, false);
-        consumer.quad(pose, cardFace(sprite, 8.5f / 16, Direction.SOUTH, true), ones, 1, 1, 1, 1, new int[4], OverlayTexture.DEFAULT_UV, false);
+        consumer.putBulkData(pose, cardFace(sprite, 7.5f / 16, Direction.NORTH, false), ones, 1, 1, 1, 1, new int[4], OverlayTexture.NO_OVERLAY, false);
+        consumer.putBulkData(pose, cardFace(sprite, 8.5f / 16, Direction.SOUTH, true), ones, 1, 1, 1, 1, new int[4], OverlayTexture.NO_OVERLAY, false);
         consumer.finishOpenVertex();
     }
 
@@ -531,6 +531,7 @@ class RemixCapturingConsumerTest {
         consumer.vertex(0.0f, 0.0f, 0.0f);
         consumer.color(0x11, 0x22, 0x33, 0xFF);
         consumer.normal(0.0f, 0.0f, 1.0f);
+        consumer.endVertex();
 
         assertEquals(0xFF112233, consumer.getColors()[0]);
     }
@@ -541,11 +542,13 @@ class RemixCapturingConsumerTest {
         channels.vertex(0.0f, 0.0f, 0.0f);
         channels.color(0x11, 0x22, 0x33, 0xFF);
         channels.normal(0.0f, 0.0f, 1.0f);
+        channels.endVertex();
 
         RemixCapturingConsumer packed = new RemixCapturingConsumer(null, true);
         packed.vertex(0.0f, 0.0f, 0.0f);
         packed.color(0xFF112233);
         packed.normal(0.0f, 0.0f, 1.0f);
+        packed.endVertex();
 
         assertEquals(packed.getColors()[0], channels.getColors()[0]);
     }
@@ -568,10 +571,10 @@ class RemixCapturingConsumerTest {
         EntityRenderContext.get().begin(true);
         RemixCapturingConsumer consumer = new RemixCapturingConsumer(null, true);
 
-        consumer.quad(new PoseStack().last(), bakedQuad(0xFFFFFFFF),
+        consumer.putBulkData(new PoseStack().last(), bakedQuad(0xFFFFFFFF),
                 new float[]{1.0f, 1.0f, 1.0f, 1.0f},
                 1.0f, 0.0f, 0.0f, 1.0f,
-                new int[]{0, 0, 0, 0}, OverlayTexture.DEFAULT_UV, false);
+                new int[]{0, 0, 0, 0}, OverlayTexture.NO_OVERLAY, false);
 
         // A pure-red tint must arrive as pure red, not pure blue.
         assertEquals(0xFFFF0000, consumer.getColors()[0]);
@@ -583,10 +586,10 @@ class RemixCapturingConsumerTest {
         RemixCapturingConsumer consumer = new RemixCapturingConsumer(null, true);
 
         // Base vertex colour r=0x80 g=0x40 b=0x20, tinted with blue at half strength.
-        consumer.quad(new PoseStack().last(), bakedQuad(0xFF204080),
+        consumer.putBulkData(new PoseStack().last(), bakedQuad(0xFF204080),
                 new float[]{1.0f, 1.0f, 1.0f, 1.0f},
                 1.0f, 1.0f, 0.5f, 1.0f,
-                new int[]{0, 0, 0, 0}, OverlayTexture.DEFAULT_UV, true);
+                new int[]{0, 0, 0, 0}, OverlayTexture.NO_OVERLAY, true);
 
         assertEquals(0xFF804010, consumer.getColors()[0]);
     }
@@ -595,10 +598,10 @@ class RemixCapturingConsumerTest {
 
     /** Renders one baked quad under {@code pose}, as ItemRenderer does for an item model. */
     private static void itemQuad(RemixCapturingConsumer consumer, PoseStack.Pose pose) {
-        consumer.quad(pose, bakedQuad(0xFFFFFFFF),
+        consumer.putBulkData(pose, bakedQuad(0xFFFFFFFF),
                 new float[]{1.0f, 1.0f, 1.0f, 1.0f},
                 1.0f, 1.0f, 1.0f, 1.0f,
-                new int[]{0, 0, 0, 0}, OverlayTexture.DEFAULT_UV, false);
+                new int[]{0, 0, 0, 0}, OverlayTexture.NO_OVERLAY, false);
     }
 
     /** A distinct pose per item, as each item render pushes its own transform. */
@@ -691,7 +694,7 @@ class RemixCapturingConsumerTest {
     @Test
     void defaultOverlayLeavesTheVertexColourAlone() {
         assertEquals(0xFF3366CC,
-                RemixCapturingConsumer.applyEntityOverlay(0xFF3366CC, OverlayTexture.DEFAULT_UV));
+                RemixCapturingConsumer.applyEntityOverlay(0xFF3366CC, OverlayTexture.NO_OVERLAY));
     }
 
     @Test
@@ -717,8 +720,9 @@ class RemixCapturingConsumerTest {
 
         consumer.vertex(0.0f, 0.0f, 0.0f);
         consumer.color(0xFFFFFFFF);
-        consumer.overlay(OverlayTexture.pack(0.0f, true));
+        consumer.overlayCoords(OverlayTexture.pack(0.0f, true));
         consumer.normal(0.0f, 1.0f, 0.0f);
+        consumer.endVertex();
 
         assertEquals(0xFFFFB2B2, consumer.getColors()[0]);
     }

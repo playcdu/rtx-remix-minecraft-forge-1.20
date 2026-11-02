@@ -11,6 +11,14 @@ also part of every mod file name.
 
 ## Unreleased
 
+### Added
+
+- An experimental Forge 1.20.1 build in `forge-1.20.1/` for the Society: Sunlit
+  Valley modpack: the same renderer on Forge 47.4, with terrain captured through
+  Embeddium, Create's machines, contraptions and trains drawn through renderers
+  Remix can see, client-only play on servers without the mod, and an install
+  script that disables the pack's shader mods.
+
 ## 0.1.0 - 2026-10-23
 
 The first public release, a beta.

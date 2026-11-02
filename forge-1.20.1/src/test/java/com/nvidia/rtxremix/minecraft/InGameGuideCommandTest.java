@@ -38,7 +38,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class InGameGuideCommandTest {
 
-    private static final Path GUIDE = Path.of("docs", "IN_GAME_GUIDE.md");
+    /** The guide is shared with the Fabric build, one directory above this project. */
+    private static final Path GUIDE = Path.of("..", "docs", "IN_GAME_GUIDE.md");
 
     private static final List<Path> COMMAND_SOURCES = List.of(
             Path.of("src", "main", "java", "com", "nvidia", "rtxremix", "minecraft", "RtxRemixMod.java"),
@@ -53,10 +54,10 @@ class InGameGuideCommandTest {
 
     /**
      * A Brigadier literal node. Anchored on the factory call, because
-     * {@code Text.literal("...")} builds chat text rather than a command node.
+     * {@code Component.literal("...")} builds chat text rather than a command node.
      */
     private static final Pattern REGISTERED_LITERAL =
-            Pattern.compile("ClientCommandManager\\.literal\\(\"([A-Za-z0-9_-]+)\"\\)");
+            Pattern.compile("Commands\\.literal\\(\"([A-Za-z0-9_-]+)\"\\)");
 
     /**
      * String, character, and comment text, whose parentheses are prose rather
@@ -126,7 +127,7 @@ class InGameGuideCommandTest {
             collectNesting(blankStringsAndComments(text), literals, children);
         }
         assertFalse(children.getOrDefault(ROOT, Set.of()).isEmpty(),
-                "No ClientCommandManager.literal(\"...\") nodes under /rtx in " + COMMAND_SOURCES);
+                "No Commands.literal(\"...\") nodes under /rtx in " + COMMAND_SOURCES);
         return children;
     }
 

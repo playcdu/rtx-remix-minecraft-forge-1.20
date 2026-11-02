@@ -7,8 +7,8 @@ package com.nvidia.rtxremix.minecraft.entity;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.renderer.texture.SpriteContents;
+import net.minecraft.client.resources.metadata.animation.AnimationMetadataSection;
 import net.minecraft.client.resources.metadata.animation.FrameSize;
-import net.minecraft.server.packs.resources.ResourceMetadata;
 import net.minecraft.resources.ResourceLocation;
 
 /** Real {@link TextureAtlasSprite}s for key and UV-remap tests, with the atlas rectangle chosen by the test. */
@@ -28,7 +28,7 @@ final class SpriteFixtures {
                 new ResourceLocation("minecraft", "test/" + x + "_" + y),
                 new FrameSize(size, size),
                 new NativeImage(size, size, false),
-                ResourceMetadata.NONE);
+                AnimationMetadataSection.EMPTY);
         // The constructor is protected; an anonymous subclass reaches it without
         // widening access for the sake of a test.
         TextureAtlasSprite sprite = new TextureAtlasSprite(ATLAS, contents, atlasSize, atlasSize, x, y) {};

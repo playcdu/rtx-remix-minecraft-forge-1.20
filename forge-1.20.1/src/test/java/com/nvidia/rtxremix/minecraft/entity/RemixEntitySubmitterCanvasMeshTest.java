@@ -66,8 +66,8 @@ class RemixEntitySubmitterCanvasMeshTest {
             TextureAtlasSprite sprite = patternSprites[layer];
             for (ModelPart.Polygon quad : flag) {
                 for (ModelPart.Vertex vertex : quad.vertices) {
-                    assertEquals(sprite.getU(vertex.u), tu[i], EPSILON, "u of vertex " + i);
-                    assertEquals(sprite.getV(vertex.v), tv[i], EPSILON, "v of vertex " + i);
+                    assertEquals(sprite.getU(vertex.u * 16.0f), tu[i], EPSILON, "u of vertex " + i);
+                    assertEquals(sprite.getV(vertex.v * 16.0f), tv[i], EPSILON, "v of vertex " + i);
                     i++;
                 }
             }
@@ -87,9 +87,9 @@ class RemixEntitySubmitterCanvasMeshTest {
             float shell = (LAYER + layer + 1) * SHELL_OFFSET;
             for (ModelPart.Polygon quad : flag) {
                 for (ModelPart.Vertex vertex : quad.vertices) {
-                    assertEquals(vertex.pos.x / 16f + quad.direction.x() * shell, px[i], EPSILON, "x of vertex " + i);
-                    assertEquals(vertex.pos.y / 16f + quad.direction.y() * shell, py[i], EPSILON, "y of vertex " + i);
-                    assertEquals(vertex.pos.z / 16f + quad.direction.z() * shell, pz[i], EPSILON, "z of vertex " + i);
+                    assertEquals(vertex.pos.x / 16f + quad.normal.x() * shell, px[i], EPSILON, "x of vertex " + i);
+                    assertEquals(vertex.pos.y / 16f + quad.normal.y() * shell, py[i], EPSILON, "y of vertex " + i);
+                    assertEquals(vertex.pos.z / 16f + quad.normal.z() * shell, pz[i], EPSILON, "z of vertex " + i);
                     i++;
                 }
             }

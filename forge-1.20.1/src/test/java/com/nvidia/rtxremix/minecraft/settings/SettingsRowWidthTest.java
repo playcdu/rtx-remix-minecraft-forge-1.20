@@ -168,7 +168,7 @@ class SettingsRowWidthTest {
     }
 
     private static Map<String, String> loadLang() {
-        JsonObject json = readJson("/assets/rtx-remix-renderer/lang/en_us.json");
+        JsonObject json = readJson("/assets/rtxremix/lang/en_us.json");
         Map<String, String> lang = new HashMap<>();
         for (Map.Entry<String, JsonElement> line : json.entrySet()) {
             lang.put(line.getKey(), line.getValue().getAsString());

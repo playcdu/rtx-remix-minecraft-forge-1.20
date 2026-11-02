@@ -28,8 +28,10 @@ def buildTimestamp = java.time.ZonedDateTime.now(java.time.ZoneOffset.UTC)
         .format(java.time.format.DateTimeFormatter.ofPattern('yyyyMMddHHmm'))
 def archProperty = project.findProperty('arch')
 group = 'com.nvidia.rtxremix.forge'
-version = "${rootProperties.getProperty('mod_version')}-${buildTimestamp}-${gitShortHash.get()}" +
-        "${gitDirty.get()}${archProperty ? '-' + archProperty : ''}"
+// A checkout without git (a source archive) still gets a valid version.
+def commitPart = gitShortHash.get() ? gitShortHash.get() + gitDirty.get() : ''
+version = [rootProperties.getProperty('mod_version'), buildTimestamp, commitPart, archProperty ?: '']
+        .findAll { it }.join('-')
 base { archivesName = 'rtx-remix-forge-1.20.1' }
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(17)

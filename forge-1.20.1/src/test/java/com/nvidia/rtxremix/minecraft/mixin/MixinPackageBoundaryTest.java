@@ -10,18 +10,22 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.nvidia.rtxremix.minecraft.RtxRemixMod;
 import org.junit.jupiter.api.Test;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
+import org.objectweb.asm.tree.AnnotationNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldNode;
+import org.objectweb.asm.tree.MethodNode;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.lang.annotation.Annotation;
-import java.lang.reflect.AnnotatedElement;
-import java.lang.reflect.Field;
-import java.lang.reflect.Member;
 import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -34,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MixinPackageBoundaryTest {
     private static final String MIXIN_PACKAGE = "com.nvidia.rtxremix.minecraft.mixin";
-    private static final String MIXIN_CONFIG = "rtx-remix-renderer.mixins.json";
+    private static final String MIXIN_CONFIG = "rtxremix.mixins.json";
     private static final String MIXIN_ANNOTATION_PACKAGE = "org.spongepowered.asm.mixin";
     private static final String MEMBER_PREFIX = "rtxremix$";
 
@@ -64,16 +68,30 @@ class MixinPackageBoundaryTest {
      * injector into the target class, where an unprefixed name can collide with the
      * target's own member or with another mod's mixin. The prefix is what keeps those
      * names distinct, so it is asserted rather than assumed.
+     *
+     * <p>The members are read from the class files: MixinExtras is nested in its
+     * Forge jar and absent from the test classpath, so reflecting on a mixin whose
+     * handler takes an {@code Operation} would fail to link.
      */
     @Test
     void mixinAddedMembersCarryTheModPrefix() throws Exception {
         Set<String> offenders = new TreeSet<>();
         for (String simpleName : configuredMixins()) {
-            Class<?> mixin = Class.forName(
-                    MIXIN_PACKAGE + "." + simpleName, false, getClass().getClassLoader());
-            for (Member member : declaredMembers(mixin)) {
-                if (isMerged(member) && !member.getName().toLowerCase().startsWith(MEMBER_PREFIX)) {
-                    offenders.add(simpleName + "." + member.getName());
+            ClassNode mixin = readClass(MIXIN_PACKAGE.replace('.', '/') + "/" + simpleName);
+            for (FieldNode field : mixin.fields) {
+                if (isMerged(field.access, field.visibleAnnotations)
+                        && !field.name.toLowerCase().startsWith(MEMBER_PREFIX)) {
+                    offenders.add(simpleName + "." + field.name);
+                }
+            }
+            for (MethodNode method : mixin.methods) {
+                if (method.name.startsWith("<")) {
+                    continue;
+                }
+                if (isMerged(method.access, method.visibleAnnotations)
+                        && !implementsInterfaceMethod(mixin, method)
+                        && !method.name.toLowerCase().startsWith(MEMBER_PREFIX)) {
+                    offenders.add(simpleName + "." + method.name);
                 }
             }
         }
@@ -96,34 +114,42 @@ class MixinPackageBoundaryTest {
         return configured;
     }
 
-    private static List<Member> declaredMembers(Class<?> mixin) {
-        List<Member> members = new ArrayList<>();
-        for (Field field : mixin.getDeclaredFields()) members.add(field);
-        for (Method method : mixin.getDeclaredMethods()) members.add(method);
-        return members;
+    private static ClassNode readClass(String internalName) throws IOException {
+        try (InputStream in = MixinPackageBoundaryTest.class.getClassLoader()
+                .getResourceAsStream(internalName + ".class")) {
+            assertNotNull(in, "missing compiled class " + internalName);
+            ClassNode node = new ClassNode();
+            new ClassReader(in).accept(node, ClassReader.SKIP_CODE | ClassReader.SKIP_FRAMES);
+            return node;
+        }
     }
 
     /** True when Mixin copies this member into the target under the name it has here. */
-    private static boolean isMerged(Member member) {
-        if (member.isSynthetic() || Modifier.isAbstract(member.getModifiers())) {
+    private static boolean isMerged(int access, List<AnnotationNode> annotations) {
+        if ((access & (Opcodes.ACC_SYNTHETIC | Opcodes.ACC_ABSTRACT)) != 0) {
             return false;
         }
-        for (Annotation annotation : ((AnnotatedElement) member).getAnnotations()) {
-            if (annotation.annotationType().getName().startsWith(MIXIN_ANNOTATION_PACKAGE)) {
-                return false;
+        if (annotations != null) {
+            for (AnnotationNode annotation : annotations) {
+                if (Type.getType(annotation.desc).getClassName().startsWith(MIXIN_ANNOTATION_PACKAGE)) {
+                    return false;
+                }
             }
         }
-        return !(member instanceof Method method) || !implementsInterfaceMethod(method);
+        return true;
     }
 
     /** An interface the mixin implements owns the name, and those interfaces are prefixed. */
-    private static boolean implementsInterfaceMethod(Method method) {
-        for (Class<?> implemented : method.getDeclaringClass().getInterfaces()) {
-            try {
-                implemented.getMethod(method.getName(), method.getParameterTypes());
-                return true;
-            } catch (NoSuchMethodException ignored) {
-                // Declared by another interface, or by the mixin itself.
+    private static boolean implementsInterfaceMethod(ClassNode mixin, MethodNode method) throws Exception {
+        Type[] parameters = Type.getArgumentTypes(method.desc);
+        for (String implemented : mixin.interfaces) {
+            Class<?> type = Class.forName(Type.getObjectType(implemented).getClassName(), false,
+                    MixinPackageBoundaryTest.class.getClassLoader());
+            for (Method candidate : type.getMethods()) {
+                if (candidate.getName().equals(method.name)
+                        && Arrays.equals(Type.getArgumentTypes(candidate), parameters)) {
+                    return true;
+                }
             }
         }
         return false;

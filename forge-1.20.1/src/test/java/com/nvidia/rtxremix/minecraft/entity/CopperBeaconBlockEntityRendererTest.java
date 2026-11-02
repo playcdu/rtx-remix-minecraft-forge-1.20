@@ -50,9 +50,9 @@ class CopperBeaconBlockEntityRendererTest {
 
                 Quaternionf headRotation =
                         CopperBeaconBlockEntityRenderer.mountingRotation(mount, forward);
-                Vector3f headUp = headRotation.rotate(new Vector3f(0.0f, 1.0f, 0.0f));
+                Vector3f headUp = headRotation.transform(new Vector3f(0.0f, 1.0f, 0.0f));
                 Vector3f headForward =
-                        headRotation.rotate(new Vector3f(0.0f, 0.0f, -1.0f));
+                        headRotation.transform(new Vector3f(0.0f, 0.0f, -1.0f));
                 String placement = "mount=" + mount + ", facing=" + forward;
 
                 assertDirection(mount, headUp, "head up for " + placement);
@@ -67,12 +67,12 @@ class CopperBeaconBlockEntityRendererTest {
         float[] angles = {-360.0f, -180.0f, -45.0f, 0.0f, 90.0f, 360.0f};
         ModelPart yoke = CopperBeaconBlockEntityRenderer
                 .getBodyTexturedModelData()
-                .createModel()
+                .bakeRoot()
                 .getChild("yoke");
         ModelPart head = yoke.getChild("head");
         ModelPart lens = CopperBeaconBlockEntityRenderer
                 .getLensTexturedModelData()
-                .createModel()
+                .bakeRoot()
                 .getChild("lens");
         PoseStack matrices = new PoseStack();
         Vector3f headDirection = new Vector3f();
@@ -84,7 +84,7 @@ class CopperBeaconBlockEntityRendererTest {
                     continue;
                 }
                 matrices.pushPose();
-                matrices.rotateAround(
+                matrices.mulPose(
                         CopperBeaconBlockEntityRenderer.mountingRotation(mount, forward));
                 for (float yaw : angles) {
                     for (float pitch : angles) {
@@ -92,15 +92,15 @@ class CopperBeaconBlockEntityRendererTest {
                         CopperBeaconBlockEntityRenderer.applyArticulation(yoke, head, lens, pose);
 
                         matrices.pushPose();
-                        yoke.offsetRotation(matrices);
-                        head.offsetRotation(matrices);
+                        yoke.translateAndRotate(matrices);
+                        head.translateAndRotate(matrices);
                         matrices.last().pose()
                                 .transformDirection(headDirection.set(0.0f, 0.0f, -1.0f))
                                 .normalize();
                         matrices.popPose();
 
                         matrices.pushPose();
-                        lens.offsetRotation(matrices);
+                        lens.translateAndRotate(matrices);
                         matrices.last().pose()
                                 .transformDirection(lensDirection.set(0.0f, 0.0f, -1.0f))
                                 .normalize();
@@ -138,19 +138,19 @@ class CopperBeaconBlockEntityRendererTest {
 
         CopperBeaconBlockEntityRenderer.applyArticulation(yoke, head, lens, pose);
 
-        assertEquals(pose.modelYawRadians(), yoke.yaw, EPSILON);
-        assertEquals(0.0f, yoke.pitch, EPSILON);
-        assertEquals(0.0f, head.yaw, EPSILON);
-        assertEquals(pose.modelPitchRadians(), head.pitch, EPSILON);
-        assertEquals(pose.modelYawRadians(), lens.yaw, EPSILON);
-        assertEquals(head.pitch, lens.pitch, EPSILON);
+        assertEquals(pose.modelYawRadians(), yoke.yRot, EPSILON);
+        assertEquals(0.0f, yoke.xRot, EPSILON);
+        assertEquals(0.0f, head.yRot, EPSILON);
+        assertEquals(pose.modelPitchRadians(), head.xRot, EPSILON);
+        assertEquals(pose.modelYawRadians(), lens.yRot, EPSILON);
+        assertEquals(head.xRot, lens.xRot, EPSILON);
     }
 
     @Test
     void headIsAChildOfTheYawFork() {
         ModelPart root = CopperBeaconBlockEntityRenderer
                 .getBodyTexturedModelData()
-                .createModel();
+                .bakeRoot();
         assertTrue(root.hasChild("yoke"));
         assertTrue(root.getChild("yoke").hasChild("head"));
         assertFalse(root.hasChild("head"));
@@ -159,26 +159,26 @@ class CopperBeaconBlockEntityRendererTest {
     @Test
     void lensMaterialIsEmissiveOnlyWhileTheAnalyticLightIsActive() {
         assertEquals(
-                "rtx-remix-renderer:block/copper_beacon_lens",
+                "rtxremix:block/copper_beacon_lens",
                 CopperBeaconBlockEntityRenderer.lensTexture(true, 1.0f)
-                        .getTextureId()
+                        .texture()
                         .toString());
         assertEquals(
-                "rtx-remix-renderer:block/copper_beacon_lens_unlit",
+                "rtxremix:block/copper_beacon_lens_unlit",
                 CopperBeaconBlockEntityRenderer.lensTexture(false, 1.0f)
-                        .getTextureId()
+                        .texture()
                         .toString());
         assertEquals(
-                "rtx-remix-renderer:block/copper_beacon_lens_unlit",
+                "rtxremix:block/copper_beacon_lens_unlit",
                 CopperBeaconBlockEntityRenderer.lensTexture(true, 0.0f)
-                        .getTextureId()
+                        .texture()
                         .toString());
     }
 
     @Test
     void activeLensHasDimLabPbrEmissionAndUnlitLensHasNoEmissionSidecar()
             throws Exception {
-        String textureRoot = "assets/rtx-remix-renderer/textures/block/";
+        String textureRoot = "assets/rtxremix/textures/block/";
         var classLoader = CopperBeaconBlockEntityRendererTest.class.getClassLoader();
         var activeSidecar = classLoader.getResourceAsStream(
                 textureRoot + "copper_beacon_lens_s.png");
@@ -198,7 +198,7 @@ class CopperBeaconBlockEntityRendererTest {
 
     @Test
     void completeModelForkSurroundsRatherThanIntersectsTheLens() {
-        String path = "assets/rtx-remix-renderer/models/block/copper_beacon_complete.json";
+        String path = "assets/rtxremix/models/block/copper_beacon_complete.json";
         var stream = CopperBeaconBlockEntityRendererTest.class
                 .getClassLoader()
                 .getResourceAsStream(path);
@@ -242,7 +242,7 @@ class CopperBeaconBlockEntityRendererTest {
             "copper_beacon_complete.json"
         };
         for (String model : models) {
-            String path = "assets/rtx-remix-renderer/models/block/" + model;
+            String path = "assets/rtxremix/models/block/" + model;
             var stream = CopperBeaconBlockEntityRendererTest.class
                     .getClassLoader()
                     .getResourceAsStream(path);
@@ -269,7 +269,7 @@ class CopperBeaconBlockEntityRendererTest {
     }
 
     private static Map<Direction, Direction> readBaseDirections() {
-        String path = "assets/rtx-remix-renderer/blockstates/copper_beacon.json";
+        String path = "assets/rtxremix/blockstates/copper_beacon.json";
         var stream = CopperBeaconBlockEntityRendererTest.class
                 .getClassLoader()
                 .getResourceAsStream(path);
@@ -290,9 +290,9 @@ class CopperBeaconBlockEntityRendererTest {
                     readBaseModelDirection(variant.get("model").getAsString());
             directions.put(
                     mount,
-                    BlockModelRotation.get(x, y)
+                    BlockModelRotation.by(x, y)
                             .actualRotation()
-                            .map(unrotatedDirection));
+                            .rotate(unrotatedDirection));
         }
         return directions;
     }

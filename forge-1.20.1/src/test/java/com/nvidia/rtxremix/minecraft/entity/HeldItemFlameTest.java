@@ -194,7 +194,7 @@ class HeldItemFlameTest {
         // the model-view with an anisotropic scale in front: so the correction must map
         // the eye to the view origin, and the moved quad must then project like the
         // unmoved one. This is what makes the depth fraction invisible in the picture.
-        Matrix4f modelView = new Matrix4f().yRot(0.7f).xRot(-0.3f).translate(0.1f, -1.6f, 0.4f);
+        Matrix4f modelView = new Matrix4f().rotateY(0.7f).rotateX(-0.3f).translate(0.1f, -1.6f, 0.4f);
         Vector3f eye = modelView.invert(new Matrix4f()).transformPosition(new Vector3f());
         Matrix4f correction = new Matrix4f();
         RemixFirstPersonPass.setViewCorrection(correction, modelView, 1.3f);

@@ -18,11 +18,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RemixJavaBoundaryTest {
     private static final Pattern GAME_IMPORT = Pattern.compile(
-            "(?m)^\\s*import\\s+(?:static\\s+)?net\\.(?:minecraft|fabricmc)\\.");
+            "(?m)^\\s*import\\s+(?:static\\s+)?net\\.(?:minecraft|minecraftforge|fabricmc)\\.");
 
     @Test
     void shimSourcesDoNotImportMinecraftOrFabric() throws Exception {
-        Path sourceRoot = Path.of("rtxremix-java", "src");
+        Path sourceRoot = Path.of("..", "rtxremix-java", "src");
         assertTrue(Files.isDirectory(sourceRoot), "missing Java shim sources: " + sourceRoot);
 
         Set<String> offenders = new TreeSet<>();
@@ -37,6 +37,6 @@ class RemixJavaBoundaryTest {
         }
 
         assertEquals(Set.of(), offenders,
-                "the Java shim must remain independent of Minecraft and Fabric");
+                "the Java shim must remain independent of Minecraft, Forge and Fabric");
     }
 }

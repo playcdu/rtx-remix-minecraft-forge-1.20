@@ -70,8 +70,8 @@ class ViewDistanceFadeTest {
 
     @Test
     void endpointProfilesMatchControllerConstants() throws Exception {
-        Map<String, Float> baseline = readConf(Path.of("packaging", "rtx.conf"));
-        Map<String, Float> minimum = readConf(Path.of("packaging", "rtx-remix", "mods",
+        Map<String, Float> baseline = readConf(Path.of("..", "packaging", "rtx.conf"));
+        Map<String, Float> minimum = readConf(Path.of("..", "packaging", "rtx-remix", "mods",
                 "minecraft-logic", "confs", "view_distance.conf"));
 
         assertEquals(ViewDistanceFade.RESTORE_FADE_MIN, baseline.get(FADE_MIN_KEY));

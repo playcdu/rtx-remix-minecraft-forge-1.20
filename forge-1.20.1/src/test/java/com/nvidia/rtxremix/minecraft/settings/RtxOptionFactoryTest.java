@@ -4,7 +4,10 @@
  */
 package com.nvidia.rtxremix.minecraft.settings;
 
+import com.mojang.serialization.JsonOps;
 import net.minecraft.client.OptionInstance;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -16,7 +19,7 @@ import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RtxOptionFactoryTest {
@@ -50,9 +53,9 @@ class RtxOptionFactoryTest {
         // one and drops it from the other. The built widget's message is what
         // the screen shows, whichever way a kind renders.
         for (RtxSetting.Kind kind : RtxSetting.Kind.values()) {
-            // GameOptions is only written when a widget's value changes.
+            // Options is only written when a widget's value changes.
             String message = toOption(settingOf(kind))
-                    .createButton(null).getMessage().getString();
+                    .createButton(null, 0, 0, 150).getMessage().getString();
 
             assertEquals(1, occurrences(message, LABEL_KEY), kind + " shows \"" + message + "\"");
         }
@@ -67,11 +70,11 @@ class RtxOptionFactoryTest {
         assertEquals(
                 "rtxremix.settings.value.procedural",
                 ((TranslatableContents) RtxOptionFactory.booleanValueText(
-                        RtxOptionFactory.PROCEDURAL_CLOUDS_ID, true).getContent()).getKey());
+                        RtxOptionFactory.PROCEDURAL_CLOUDS_ID, true).getContents()).getKey());
         assertEquals(
                 "rtxremix.settings.value.classic",
                 ((TranslatableContents) RtxOptionFactory.booleanValueText(
-                        RtxOptionFactory.PROCEDURAL_CLOUDS_ID, false).getContent()).getKey());
+                        RtxOptionFactory.PROCEDURAL_CLOUDS_ID, false).getContents()).getKey());
     }
 
     @Test
@@ -104,9 +107,9 @@ class RtxOptionFactoryTest {
 
         assertEquals("options.framerateLimit.max",
                 ((TranslatableContents) RtxOptionFactory.intValueText(id, 260)
-                        .getContent()).getKey());
+                        .getContents()).getKey());
         TranslatableContents capped = (TranslatableContents)
-                RtxOptionFactory.intValueText(id, 120).getContent();
+                RtxOptionFactory.intValueText(id, 120).getContents();
         assertEquals("options.framerate", capped.getKey());
         assertEquals(120, capped.getArgs()[0]);
     }
@@ -131,27 +134,41 @@ class RtxOptionFactoryTest {
                         0.0, 1.0, 0.5, () -> 0.5, value -> { })
                         .deferSliderApply();
 
-        assertFalse(sliderCallbacks(toOption(integerSetting))
-                .applyValueImmediately());
-        assertFalse(sliderCallbacks(toOption(floatSetting))
-                .applyValueImmediately());
+        assertFalse(appliesImmediately(toOption(integerSetting).createButton(null, 0, 0, 150)));
+        assertFalse(appliesImmediately(toOption(floatSetting).createButton(null, 0, 0, 150)));
     }
 
     @Test
     void immediateSliderPolicyPreservesTheOriginalCallbacks() {
+        // 1.20.1's own slider saves options.txt on every step, so even an
+        // immediate policy builds RtxOptionFactory's slider; it must keep the
+        // wrapped callbacks' value mapping and apply each step.
         var callbacks = OptionInstance.UnitDouble.INSTANCE;
+        OptionInstance.SliderableValueSet<Double> policy =
+                RtxOptionFactory.sliderApplyPolicy(callbacks, true, value -> Component.literal(value.toString()));
 
-        assertTrue(callbacks.applyValueImmediately());
-        assertSame(callbacks, RtxOptionFactory.sliderApplyPolicy(callbacks, true));
+        for (double progress : new double[]{0.0, 0.25, 1.0}) {
+            assertEquals(callbacks.fromSliderValue(progress), policy.fromSliderValue(progress));
+            assertEquals(callbacks.toSliderValue(progress), policy.toSliderValue(progress));
+            assertEquals(callbacks.validateValue(progress), policy.validateValue(progress));
+            assertEquals(callbacks.codec().encodeStart(JsonOps.INSTANCE, progress).result(),
+                    policy.codec().encodeStart(JsonOps.INSTANCE, progress).result());
+        }
+        OptionInstance<Double> option = new OptionInstance<>(
+                LABEL_KEY, OptionInstance.noTooltip(), (caption, value) -> caption,
+                policy, 0.5, value -> { });
+        assertTrue(appliesImmediately(option.createButton(null, 0, 0, 150)));
     }
 
-    private static OptionInstance.SliderableValueSet<?> sliderCallbacks(OptionInstance<?> option) {
+    private static boolean appliesImmediately(AbstractWidget widget) {
+        assertInstanceOf(RtxOptionFactory.OptionSlider.class, widget);
         try {
-            Field callbacksField = OptionInstance.class.getDeclaredField("callbacks");
-            callbacksField.setAccessible(true);
-            return (OptionInstance.SliderableValueSet<?>) callbacksField.get(option);
+            Field applyImmediately =
+                    RtxOptionFactory.OptionSlider.class.getDeclaredField("applyImmediately");
+            applyImmediately.setAccessible(true);
+            return applyImmediately.getBoolean(widget);
         } catch (ReflectiveOperationException e) {
-            throw new AssertionError("Could not inspect OptionInstance callbacks", e);
+            throw new AssertionError("Could not inspect the option slider's apply policy", e);
         }
     }
 
@@ -193,7 +210,7 @@ class RtxOptionFactoryTest {
     void zeroRendersAsAutoForBothDistanceSliders() {
         for (String id : List.of("dist.entity", "dist.light")) {
             assertEquals("rtxremix.settings.value.auto",
-                    ((TranslatableContents) RtxOptionFactory.intValueText(id, 0).getContent()).getKey(), id);
+                    ((TranslatableContents) RtxOptionFactory.intValueText(id, 0).getContents()).getKey(), id);
         }
         assertEquals("7", RtxOptionFactory.intValueText("dist.entity", 7).getString());
         assertEquals("0", RtxOptionFactory.intValueText("light.reach", 0).getString(),

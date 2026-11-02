@@ -238,7 +238,7 @@ public final class ConfLayerDriver {
 
     /**
      * Maps authored biome conf file stems to layer rows. Only exact vanilla
-     * 1.21.1 biome paths are accepted: the file-name contract carries no
+     * 1.20.1 biome paths are accepted: the file-name contract carries no
      * namespace, so modded biomes are deliberately not driven. Sorted for a
      * deterministic layer order.
      */
@@ -251,7 +251,7 @@ public final class ConfLayerDriver {
         for (String stem : sorted) {
             if (!vanillaBiomes.contains(stem)) {
                 LOGGER.warn("Ignoring biome conf with unknown filename stem '{}' in confs/biomes/ "
-                        + "(use an exact vanilla 1.21.1 biome path)", stem);
+                        + "(use an exact vanilla 1.20.1 biome path)", stem);
                 continue;
             }
             rows.add(new LayerSpec(LogicChannels.BIOME_PREFIX + stem,

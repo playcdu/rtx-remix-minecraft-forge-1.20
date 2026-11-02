@@ -4,12 +4,14 @@
  */
 package com.nvidia.rtxremix.minecraft.entity;
 
+import com.nvidia.rtxremix.minecraft.MinecraftTestBootstrap;
 import com.mojang.blaze3d.vertex.SheetedDecalTextureGenerator;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.core.Direction;
 import org.joml.Vector3f;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -29,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
  *
  * <p>The projector replaces vanilla's {@code SheetedDecalTextureGenerator}, so its texture
  * coordinates are pinned against the vanilla consumer on an identity pose for every
- * face, and it is pinned to deliver them before the normal, which is where
+ * face, and it is pinned to deliver them before {@code endVertex}, which is where
  * {@link RemixCapturingConsumer} closes a vertex.
  */
 class RemixBlockDamagePassTest {
@@ -37,6 +39,15 @@ class RemixBlockDamagePassTest {
     private static final int OVERLAY = 0;
     private static final int LIGHT = 0;
     private static final float UV_TOLERANCE = 1.0e-6f;
+
+    /**
+     * Vanilla's crack consumer and the projector both pick a face through Forge's
+     * {@code getNearestStable}, which reads Forge's client config.
+     */
+    @BeforeAll
+    static void bootstrapMinecraft() {
+        MinecraftTestBootstrap.forgeClientConfigDefaults();
+    }
 
     @AfterEach
     void clearRenderContext() {
@@ -78,8 +89,7 @@ class RemixBlockDamagePassTest {
     void projectionMatchesVanillaOverlayConsumerOnEveryFace() {
         for (Direction face : Direction.values()) {
             Recorder vanillaOut = new Recorder();
-            VertexConsumer vanilla = new SheetedDecalTextureGenerator(
-                    vanillaOut, new PoseStack().last(), 1.0F);
+            VertexConsumer vanilla = vanillaCrackConsumer(vanillaOut);
             Recorder projectorOut = new Recorder();
             VertexConsumer projector = new RemixBlockDamagePass.CrackProjector().target(projectorOut);
 
@@ -111,7 +121,7 @@ class RemixBlockDamagePassTest {
     void projectedUvIsPresentWhenTheCapturingConsumerClosesTheVertex() {
         EntityRenderContext.get().begin(true);
         Recorder vanillaOut = new Recorder();
-        feedFace(new SheetedDecalTextureGenerator(vanillaOut, new PoseStack().last(), 1.0F), Direction.NORTH);
+        feedFace(vanillaCrackConsumer(vanillaOut), Direction.NORTH);
         List<Recorder.Vertex> expected = vanillaOut.finish();
 
         RemixCapturingConsumer capture = new RemixCapturingConsumer(null, true);
@@ -126,8 +136,14 @@ class RemixBlockDamagePassTest {
         }
     }
 
+    /** Vanilla's crack consumer on an identity pose, as the projector's reference. */
+    private static VertexConsumer vanillaCrackConsumer(VertexConsumer delegate) {
+        PoseStack.Pose identity = new PoseStack().last();
+        return new SheetedDecalTextureGenerator(delegate, identity.pose(), identity.normal(), 1.0F);
+    }
+
     /**
-     * Feeds the four corners of one unit-cube face the way {@code VertexConsumer.quad}
+     * Feeds the four corners of one unit-cube face the way {@code VertexConsumer.putBulkData}
      * does: through the element-by-element default, with the block model's own atlas
      * coordinates and a tinted, shaded colour that the crack must not inherit.
      */
@@ -143,8 +159,10 @@ class RemixBlockDamagePassTest {
                     .add(new Vector3f(tangent).mul(0.5f * corners[i][0]))
                     .add(new Vector3f(bitangent).mul(0.5f * corners[i][1]));
             int shadedTint = 0xFF3080C0 - i;
-            consumer.vertex(p.x, p.y, p.z, shadedTint, 0.25f + 0.1f * i, 0.75f,
-                    OVERLAY, LIGHT, n.x, n.y, n.z);
+            consumer.vertex(p.x, p.y, p.z,
+                    ((shadedTint >> 16) & 0xFF) / 255.0f, ((shadedTint >> 8) & 0xFF) / 255.0f,
+                    (shadedTint & 0xFF) / 255.0f, (shadedTint >>> 24) / 255.0f,
+                    0.25f + 0.1f * i, 0.75f, OVERLAY, LIGHT, n.x, n.y, n.z);
         }
     }
 
@@ -154,31 +172,25 @@ class RemixBlockDamagePassTest {
                       float nx, float ny, float nz) {}
 
         private final List<Vertex> vertices = new ArrayList<>();
-        private boolean open;
         private float x, y, z, u, v, nx, ny, nz;
         private int color;
 
         List<Vertex> finish() {
-            flush();
             return vertices;
         }
 
-        private void flush() {
-            if (open) {
-                vertices.add(new Vertex(x, y, z, color, u, v, nx, ny, nz));
-            }
-            open = false;
+        @Override
+        public VertexConsumer vertex(double x, double y, double z) {
+            this.x = (float) x; this.y = (float) y; this.z = (float) z;
+            return this;
         }
 
         @Override
-        public VertexConsumer vertex(float x, float y, float z) {
-            flush();
-            open = true;
-            this.x = x; this.y = y; this.z = z;
+        public void endVertex() {
+            vertices.add(new Vertex(x, y, z, color, u, v, nx, ny, nz));
             color = 0;
             u = 0; v = 0;
             nx = 0; ny = 0; nz = 0;
-            return this;
         }
 
         @Override
@@ -194,7 +206,9 @@ class RemixBlockDamagePassTest {
         }
 
         @Override public VertexConsumer overlayCoords(int u, int v) { return this; }
-        @Override public VertexConsumer light(int u, int v) { return this; }
+        @Override public VertexConsumer uv2(int u, int v) { return this; }
+        @Override public void defaultColor(int red, int green, int blue, int alpha) { }
+        @Override public void unsetDefaultColor() { }
 
         @Override
         public VertexConsumer normal(float x, float y, float z) {

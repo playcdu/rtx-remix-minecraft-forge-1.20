@@ -5,17 +5,15 @@
 package com.nvidia.rtxremix.minecraft.light;
 
 import com.google.gson.JsonParser;
-import net.minecraft.registry.VersionedIdentifier; // PORT: no 1.20.1 equivalent
+import com.nvidia.rtxremix.minecraft.MinecraftTestBootstrap;
 import net.minecraft.server.packs.resources.IoSupplier;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.server.packs.PackResources;
-import net.minecraft.resource.ResourcePackInfo; // PORT: no 1.20.1 equivalent
-import net.minecraft.server.packs.repository.PackSource;
 import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.metadata.MetadataSectionSerializer;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
@@ -48,6 +46,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BlockLightRuleManagerTest {
+
+    /** Reloading resolves rules against the block registry. */
+    @BeforeAll
+    static void bootstrapMinecraft() {
+        MinecraftTestBootstrap.registries();
+    }
 
     @Test
     void parseJsonRulePreservesTheAuthoredRectSpec() throws Exception {
@@ -386,7 +390,7 @@ class BlockLightRuleManagerTest {
         }
 
         @Override
-        public void listResources(PackType type, String namespace, String prefix, ResultConsumer consumer) {
+        public void listResources(PackType type, String namespace, String prefix, ResourceOutput consumer) {
         }
 
         @Override
@@ -400,8 +404,8 @@ class BlockLightRuleManagerTest {
         }
 
         @Override
-        public ResourcePackInfo getInfo() {
-            return new ResourcePackInfo(id, Component.literal(id), PackSource.NONE, Optional.<VersionedIdentifier>empty());
+        public String packId() {
+            return id;
         }
 
         @Override
