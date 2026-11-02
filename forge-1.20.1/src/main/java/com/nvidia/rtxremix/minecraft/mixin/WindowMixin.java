@@ -4,6 +4,8 @@
  */
 package com.nvidia.rtxremix.minecraft.mixin;
 
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.mojang.blaze3d.platform.Window;
 import com.nvidia.rtxremix.minecraft.RtxRemixMod;
 import org.spongepowered.asm.mixin.Final;
@@ -41,24 +43,26 @@ public abstract class WindowMixin {
     private long window;
 
     /**
-     * Runs after the last of vanilla's six context hints (forward compatibility),
-     * ahead of {@code ImmediateWindowHandler.setupMinecraftWindow}. That call
-     * itself is redirected by Embeddium, so it is not used as the anchor. Not
-     * required: on the default early-window path the hints are inert, so a
-     * conflicting mod must not be able to stop the game over them.
+     * Wraps the last of vanilla's six context hints (forward compatibility), ahead of
+     * {@code ImmediateWindowHandler.setupMinecraftWindow}, and raises the requested
+     * context after it. That call itself is redirected by Embeddium, so it is not used
+     * as the anchor. A wrapper rather than an {@code @Inject}: Forge 1.20.1 ships
+     * Mixin 0.8.5, which accepts an {@code @Inject} into a constructor only at its
+     * return. Not required: on the default early-window path the hints are inert, so
+     * a conflicting mod must not be able to stop the game over them.
      */
-    @Inject(
+    @WrapOperation(
         method = "<init>",
         at = @At(
             value = "INVOKE",
             target = "Lorg/lwjgl/glfw/GLFW;glfwWindowHint(II)V",
             ordinal = 5,
-            shift = At.Shift.AFTER,
             remap = false
         ),
         require = 0
     )
-    private void rtxremix$requireOpenGl44(CallbackInfo ci) {
+    private void rtxremix$requireOpenGl44(int hint, int value, Operation<Void> original) {
+        original.call(hint, value);
         // Core-profile 4.4: the GL interop imports Remix's images and semaphores
         // through EXT_memory_object and EXT_semaphore.
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
